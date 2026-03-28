@@ -7,10 +7,110 @@
 #include <QScreen>
 #include <QGuiApplication>
 #include <QPixmap>
+#include <QStringList>
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
 
 namespace DesktopTranslate {
+
+namespace {
+
+QString removeThinkBlocks(QString text) {
+    const QString openTag = "<think>";
+    const QString closeTag = "</think>";
+    int openPos = text.indexOf(openTag);
+
+    while (openPos >= 0) {
+        const int closePos = text.indexOf(closeTag, openPos + openTag.size());
+        if (closePos < 0) {
+            text.remove(openPos, text.size() - openPos);
+            break;
+        }
+
+        text.remove(openPos, closePos + closeTag.size() - openPos);
+        openPos = text.indexOf(openTag);
+    }
+
+    return text.trimmed();
+}
+
+QString extractMessageText(const nlohmann::json& content) {
+    if (content.is_string()) {
+        return QString::fromStdString(content.get<std::string>());
+    }
+
+    if (content.is_null()) {
+        return {};
+    }
+
+    if (content.is_array()) {
+        QString combined;
+        for (const auto& item : content) {
+            if (item.is_string()) {
+                combined += QString::fromStdString(item.get<std::string>());
+                continue;
+            }
+
+            if (!item.is_object()) {
+                continue;
+            }
+
+            if (item.contains("text") && item["text"].is_string()) {
+                combined += QString::fromStdString(item["text"].get<std::string>());
+                continue;
+            }
+
+            if (item.contains("content") && item["content"].is_string()) {
+                combined += QString::fromStdString(item["content"].get<std::string>());
+            }
+        }
+        return combined;
+    }
+
+    if (content.is_object()) {
+        if (content.contains("text") && content["text"].is_string()) {
+            return QString::fromStdString(content["text"].get<std::string>());
+        }
+
+        if (content.contains("content") && content["content"].is_string()) {
+            return QString::fromStdString(content["content"].get<std::string>());
+        }
+    }
+
+    return QString::fromStdString(content.dump());
+}
+
+QString normalizeOcrText(const QString& rawText) {
+    QString normalized = removeThinkBlocks(rawText);
+    normalized.replace("\r\n", "\n");
+    normalized.replace('\r', '\n');
+
+    const QStringList lines = normalized.split('\n');
+    QStringList normalizedLines;
+    for (QString line : lines) {
+        line = line.trimmed();
+        if (line.isEmpty()) {
+            if (!normalizedLines.isEmpty() && !normalizedLines.back().isEmpty()) {
+                normalizedLines.append("");
+            }
+            continue;
+        }
+
+        normalizedLines.append(line);
+    }
+
+    return normalizedLines.join("\n").trimmed();
+}
+
+bool isNoTextMarker(const QString& text) {
+    const QString normalized = text.trimmed().toLower();
+    return normalized == "no text found"
+        || normalized == "no text"
+        || normalized == "未发现文本"
+        || normalized == "未检测到文本";
+}
+
+}
 
 OCRService& OCRService::instance() {
     static OCRService instance;
@@ -72,7 +172,7 @@ OCRResult OCRService::recognizeText(const QImage& image) {
                 {"content", {
                     {
                         {"type", "text"},
-                        {"text", "Please extract all text from this image. Only output the extracted text, no explanations. If there is no text, output 'No text found'."}
+                        {"text", "Extract all visible text from this image in natural reading order. Output plain text only. Preserve meaningful paragraph breaks and list items. Do not describe the image, do not add explanations, and do not wrap the result in markdown or code fences. If there is no readable text, output 'No text found'."}
                     },
                     {
                         {"type", "image_url"},
@@ -97,6 +197,7 @@ OCRResult OCRService::recognizeText(const QImage& image) {
     
     std::string response;
     std::string url = api_host_ + ":" + std::to_string(api_port_) + "/v1/chat/completions";
+    long httpCode = 0;
     
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
@@ -109,6 +210,7 @@ OCRResult OCRService::recognizeText(const QImage& image) {
     // 设置请求头
     struct curl_slist* headers = nullptr;
     headers = curl_slist_append(headers, "Content-Type: application/json");
+    headers = curl_slist_append(headers, "Accept: application/json");
     
     if (!api_key_.empty()) {
         std::string authHeader = "Authorization: Bearer " + api_key_;
@@ -123,12 +225,19 @@ OCRResult OCRService::recognizeText(const QImage& image) {
     qDebug() << "Image size:" << image.width() << "x" << image.height();
     
     CURLcode res = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
     
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     
     if (res != CURLE_OK) {
         result.error = QString("CURL error: ") + curl_easy_strerror(res);
+        qWarning() << "OCR request failed:" << result.error;
+        return result;
+    }
+
+    if (httpCode < 200 || httpCode >= 300) {
+        result.error = QString("HTTP error %1: %2").arg(httpCode).arg(QString::fromStdString(response));
         qWarning() << "OCR request failed:" << result.error;
         return result;
     }
@@ -144,15 +253,21 @@ OCRResult OCRService::recognizeText(const QImage& image) {
         }
         
         if (responseJson.contains("choices") && !responseJson["choices"].empty()) {
-            result.text = QString::fromStdString(
-                responseJson["choices"][0]["message"]["content"].get<std::string>()
-            );
-            result.success = true;
-            result.text = result.text.trimmed();
-            
-            // 移除可能的 "No text found" 标记
-            if (result.text == "No text found") {
+            const auto& message = responseJson["choices"][0]["message"];
+            const auto content = message.contains("content") ? message["content"] : nlohmann::json{};
+            result.text = normalizeOcrText(extractMessageText(content));
+
+            if (result.text.isEmpty() && message.contains("reasoning_content") && message["reasoning_content"].is_string()) {
+                result.text = normalizeOcrText(QString::fromStdString(message["reasoning_content"].get<std::string>()));
+            }
+
+            if (isNoTextMarker(result.text)) {
                 result.text.clear();
+            }
+
+            result.success = !result.text.isEmpty();
+            if (!result.success) {
+                result.error = "No text found in response";
             }
         } else {
             result.error = "No text found in response";
@@ -190,8 +305,6 @@ OCRResult OCRService::recognizeScreenArea(int x, int y, int width, int height) {
     // grabWindow 使用的是物理像素坐标
     // 在高DPI屏幕上，需要乘以 devicePixelRatio
     // 但是 grabWindow 的坐标原点在虚拟屏幕的左上角
-    qreal dpr = screen->devicePixelRatio();
-    
     // 直接使用逻辑坐标进行截图，不缩放
     // Qt 会自动处理坐标转换
     QPixmap pixmap = screen->grabWindow(0, x, y, width, height);

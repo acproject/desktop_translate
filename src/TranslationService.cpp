@@ -26,6 +26,111 @@ std::string trimWhitespace(const std::string& value) {
     return value.substr(start, end - start);
 }
 
+std::string normalizeLineEndings(const std::string& value) {
+    std::string normalized;
+    normalized.reserve(value.size());
+
+    for (size_t index = 0; index < value.size(); ++index) {
+        if (value[index] == '\r') {
+            normalized.push_back('\n');
+            if (index + 1 < value.size() && value[index + 1] == '\n') {
+                ++index;
+            }
+            continue;
+        }
+
+        normalized.push_back(value[index]);
+    }
+
+    return normalized;
+}
+
+bool isBulletLine(const std::string& line) {
+    if (line.empty()) {
+        return false;
+    }
+
+    const unsigned char first = static_cast<unsigned char>(line.front());
+    if (first == '-' || first == '*' || line.rfind("\xE2\x80\xA2", 0) == 0) {
+        return true;
+    }
+
+    size_t index = 0;
+    while (index < line.size() && std::isdigit(static_cast<unsigned char>(line[index]))) {
+        ++index;
+    }
+
+    return index > 0
+        && index < line.size()
+        && (line[index] == '.' || line[index] == ')');
+}
+
+bool shouldMergeLines(const std::string& previousLine, const std::string& currentLine) {
+    if (previousLine.empty() || currentLine.empty()) {
+        return false;
+    }
+
+    if (isBulletLine(previousLine) || isBulletLine(currentLine)) {
+        return false;
+    }
+
+    const char lastChar = previousLine.back();
+    if (lastChar == ':' || previousLine.ends_with("\xEF\xBC\x9A")) {
+        return false;
+    }
+
+    return lastChar != '.'
+        && lastChar != '!'
+        && lastChar != '?'
+        && lastChar != ';';
+}
+
+std::string preprocessTextForTranslation(const std::string& text) {
+    std::istringstream stream(normalizeLineEndings(text));
+    std::string line;
+    std::vector<std::string> normalizedLines;
+
+    while (std::getline(stream, line)) {
+        std::string trimmed = trimWhitespace(line);
+        if (trimmed.empty()) {
+            if (!normalizedLines.empty() && !normalizedLines.back().empty()) {
+                normalizedLines.push_back("");
+            }
+            continue;
+        }
+
+        if (normalizedLines.empty() || normalizedLines.back().empty()) {
+            normalizedLines.push_back(trimmed);
+            continue;
+        }
+
+        std::string& previousLine = normalizedLines.back();
+        if (previousLine.back() == '-'
+            && std::isalnum(static_cast<unsigned char>(trimmed.front()))) {
+            previousLine.pop_back();
+            previousLine += trimmed;
+            continue;
+        }
+
+        if (shouldMergeLines(previousLine, trimmed)) {
+            previousLine += " " + trimmed;
+            continue;
+        }
+
+        normalizedLines.push_back(trimmed);
+    }
+
+    std::ostringstream normalizedText;
+    for (size_t index = 0; index < normalizedLines.size(); ++index) {
+        if (index > 0) {
+            normalizedText << '\n';
+        }
+        normalizedText << normalizedLines[index];
+    }
+
+    return trimWhitespace(normalizedText.str());
+}
+
 std::string removeThinkBlocks(const std::string& value) {
     std::string cleaned = value;
     const std::string openTag = "<think>";
@@ -133,14 +238,15 @@ std::string buildSystemPrompt(const std::string& sourceLanguage, const std::stri
     prompt << "You are a professional translation engine. "
            << "Return only the final translated text.\n"
            << "Requirements:\n"
-           << "1. Preserve meaning, tone, formatting, line breaks, lists, placeholders, markdown, code, numbers, and proper nouns.\n"
+           << "1. Preserve meaning, tone, meaningful paragraph structure, lists, placeholders, markdown, code, numbers, and proper nouns.\n"
            << "2. Do not omit, summarize, explain, answer questions, or add commentary.\n"
-           << "3. Do not output reasoning, analysis, or any XML/HTML style tags.\n";
+           << "3. Ignore obvious OCR hard wraps inside the same paragraph, but keep real paragraph breaks and list structure.\n"
+           << "4. Do not output reasoning, analysis, or any XML/HTML style tags.\n";
 
     if (sourceLanguage == "auto") {
-        prompt << "4. Automatically detect the source language and translate into " << targetLanguage << ".";
+        prompt << "5. Automatically detect the source language and translate into " << targetLanguage << ".";
     } else {
-        prompt << "4. Translate from " << sourceLanguage << " into " << targetLanguage << ".";
+        prompt << "5. Translate from " << sourceLanguage << " into " << targetLanguage << ".";
     }
 
     return prompt.str();
@@ -344,7 +450,14 @@ TranslationResult TranslationService::translate(const std::string& text) {
     result.original_text = text;
     
     try {
-        std::string requestBody = buildRequestBody(text);
+        const std::string normalizedText = preprocessTextForTranslation(text);
+        const std::string& requestText = normalizedText.empty() ? text : normalizedText;
+
+        if (requestText != text) {
+            qDebug() << "Normalized translation input preview:" << QString::fromStdString(requestText.substr(0, 300));
+        }
+
+        std::string requestBody = buildRequestBody(requestText);
         std::string response = sendHttpRequest(requestBody);
         result = parseResponse(response, text);
     } catch (const std::exception& e) {
