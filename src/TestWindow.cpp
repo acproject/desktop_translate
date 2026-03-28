@@ -18,8 +18,8 @@ TestWindow::TestWindow(QWidget* parent)
 
 void TestWindow::setupUI() {
     setWindowTitle(tr("翻译工具 - 测试窗口"));
-    setMinimumSize(600, 500);
-    resize(700, 600);
+    setMinimumSize(700, 700);  // 增加窗口大小
+    resize(750, 800);
     
     // 设置窗口标志为独立顶层窗口
     setWindowFlags(Qt::Window | Qt::WindowStaysOnTopHint);
@@ -114,7 +114,7 @@ void TestWindow::setupUI() {
     testLayout->addWidget(testInputLabel);
     
     auto* testInputEdit = new QTextEdit(this);
-    testInputEdit->setMaximumHeight(80);
+    testInputEdit->setMinimumHeight(120);  // 增加最小高度
     testInputEdit->setPlaceholderText(tr("在此输入文本测试翻译功能..."));
     testLayout->addWidget(testInputEdit);
     
