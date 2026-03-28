@@ -173,7 +173,7 @@ OCRResult OCRService::recognizeText(const QString& imagePath) {
 OCRResult OCRService::recognizeScreenArea(int x, int y, int width, int height) {
     OCRResult result;
     
-    qDebug() << "Capturing screen area:" << x << y << width << height;
+    qDebug() << "Input screen area:" << x << y << width << height;
     
     // 截取屏幕区域
     QScreen* screen = QGuiApplication::primaryScreen();
@@ -182,17 +182,19 @@ OCRResult OCRService::recognizeScreenArea(int x, int y, int width, int height) {
         return result;
     }
     
-    // 考虑设备像素比（高DPI屏幕）
-    qreal devicePixelRatio = screen->devicePixelRatio();
-    int scaledX = static_cast<int>(x * devicePixelRatio);
-    int scaledY = static_cast<int>(y * devicePixelRatio);
-    int scaledWidth = static_cast<int>(width * devicePixelRatio);
-    int scaledHeight = static_cast<int>(height * devicePixelRatio);
+    // 获取屏幕几何信息
+    QRect screenGeometry = screen->geometry();
+    qDebug() << "Screen geometry:" << screenGeometry;
+    qDebug() << "Device pixel ratio:" << screen->devicePixelRatio();
     
-    qDebug() << "Device pixel ratio:" << devicePixelRatio;
-    qDebug() << "Scaled area:" << scaledX << scaledY << scaledWidth << scaledHeight;
+    // grabWindow 使用的是物理像素坐标
+    // 在高DPI屏幕上，需要乘以 devicePixelRatio
+    // 但是 grabWindow 的坐标原点在虚拟屏幕的左上角
+    qreal dpr = screen->devicePixelRatio();
     
-    QPixmap pixmap = screen->grabWindow(0, scaledX, scaledY, scaledWidth, scaledHeight);
+    // 直接使用逻辑坐标进行截图，不缩放
+    // Qt 会自动处理坐标转换
+    QPixmap pixmap = screen->grabWindow(0, x, y, width, height);
     
     if (pixmap.isNull()) {
         result.error = "Failed to capture screen area";
@@ -202,7 +204,17 @@ OCRResult OCRService::recognizeScreenArea(int x, int y, int width, int height) {
     QImage image = pixmap.toImage();
     qDebug() << "Captured image size:" << image.width() << "x" << image.height();
     
-    return recognizeText(image);
+    // 保存截图到结果中
+    result.screenshot = image;
+    
+    auto ocrResult = recognizeText(image);
+    result.success = ocrResult.success;
+    result.text = ocrResult.text;
+    if (!ocrResult.success) {
+        result.error = ocrResult.error;
+    }
+    
+    return result;
 }
 
 } // namespace DesktopTranslate

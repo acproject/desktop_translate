@@ -133,12 +133,12 @@ void SelectionOverlay::mousePressEvent(QMouseEvent* event) {
             return;
         }
         
-        // 开始新的选区
+        // 开始新的选区 - 使用全局坐标
         is_selecting_ = true;
         has_selection_ = false;
-        start_point_ = event->pos();
+        start_point_ = event->globalPos();
         end_point_ = start_point_;
-        rubber_band_->setGeometry(QRect(start_point_, end_point_).normalized());
+        rubber_band_->setGeometry(QRect(mapFromGlobal(start_point_), mapFromGlobal(end_point_)).normalized());
         rubber_band_->show();
         
         // 隐藏之前的按钮
@@ -154,7 +154,7 @@ void SelectionOverlay::mousePressEvent(QMouseEvent* event) {
 
 void SelectionOverlay::mouseMoveEvent(QMouseEvent* event) {
     if (is_selecting_) {
-        end_point_ = event->pos();
+        end_point_ = event->globalPos();
         updateRubberBand();
         showSelectionInfo();
     }
@@ -165,7 +165,7 @@ void SelectionOverlay::mouseMoveEvent(QMouseEvent* event) {
 void SelectionOverlay::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton && is_selecting_) {
         is_selecting_ = false;
-        end_point_ = event->pos();
+        end_point_ = event->globalPos();
         
         selection_rect_ = QRect(start_point_, end_point_).normalized();
         
@@ -213,19 +213,23 @@ void SelectionOverlay::paintEvent(QPaintEvent* event) {
     painter.setRenderHint(QPainter::Antialiasing);
     
     if (has_selection_) {
+        // 将全局选区坐标转换为窗口相对坐标
+        QRect localSelectionRect(mapFromGlobal(selection_rect_.topLeft()), 
+                                  mapFromGlobal(selection_rect_.bottomRight()));
+        
         // 绘制半透明背景，但选区区域清晰
         QColor overlayColor(0, 0, 0, 100);
         painter.fillRect(rect(), overlayColor);
         
         // 选区区域保持清晰
         painter.setCompositionMode(QPainter::CompositionMode_Clear);
-        painter.fillRect(selection_rect_, Qt::transparent);
+        painter.fillRect(localSelectionRect, Qt::transparent);
         painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
         
         // 绘制选区边框
         QPen pen(QColor(74, 144, 217), 2);
         painter.setPen(pen);
-        painter.drawRect(selection_rect_);
+        painter.drawRect(localSelectionRect);
     } else {
         // 绘制淡色背景
         QColor overlayColor(0, 0, 0, 30);
@@ -235,13 +239,14 @@ void SelectionOverlay::paintEvent(QPaintEvent* event) {
 
 void SelectionOverlay::updateRubberBand() {
     if (rubber_band_) {
-        selection_rect_ = QRect(start_point_, end_point_).normalized();
-        rubber_band_->setGeometry(selection_rect_);
+        // 将全局坐标转换为窗口相对坐标用于橡皮筋显示
+        QRect localRect(mapFromGlobal(start_point_), mapFromGlobal(end_point_));
+        rubber_band_->setGeometry(localRect.normalized());
     }
 }
 
 void SelectionOverlay::updateButtonsPosition() {
-    // 将按钮放在选区右下角
+    // 将按钮放在选区右下角（使用全局坐标计算，然后转换为窗口坐标）
     int buttonY = selection_rect_.bottom() + 10;
     int buttonX = selection_rect_.right();
     
@@ -253,17 +258,21 @@ void SelectionOverlay::updateButtonsPosition() {
     auto screen = QGuiApplication::primaryScreen();
     QRect screenRect = screen->geometry();
     
-    if (buttonX < 10) buttonX = 10;
-    if (buttonY + confirm_button_->sizeHint().height() > screenRect.height() - 10) {
+    if (buttonX < screenRect.left() + 10) buttonX = screenRect.left() + 10;
+    if (buttonY + confirm_button_->sizeHint().height() > screenRect.bottom() - 10) {
         buttonY = selection_rect_.top() - confirm_button_->sizeHint().height() - 10;
     }
     
-    // 定位信息标签
-    info_label_->move(selection_rect_.left(), selection_rect_.top() - 35);
+    // 转换为窗口相对坐标
+    QPoint buttonPos = mapFromGlobal(QPoint(buttonX, buttonY));
     
-    // 定位按钮
-    confirm_button_->move(buttonX, buttonY);
-    cancel_button_->move(buttonX + confirm_button_->sizeHint().width() + 10, buttonY);
+    // 定位信息标签（使用全局坐标转换为窗口坐标）
+    QPoint infoPos = mapFromGlobal(QPoint(selection_rect_.left(), selection_rect_.top() - 35));
+    info_label_->move(infoPos);
+    
+    // 定位按钮（使用转换后的坐标）
+    confirm_button_->move(buttonPos);
+    cancel_button_->move(buttonPos.x() + confirm_button_->sizeHint().width() + 10, buttonPos.y());
 }
 
 void SelectionOverlay::showSelectionInfo() {
@@ -272,7 +281,8 @@ void SelectionOverlay::showSelectionInfo() {
         .arg(selection_rect_.height());
     info_label_->setText(info);
     info_label_->adjustSize();
-    info_label_->move(selection_rect_.left(), selection_rect_.top() - 35);
+    QPoint infoPos = mapFromGlobal(QPoint(selection_rect_.left(), selection_rect_.top() - 35));
+    info_label_->move(infoPos);
 }
 
 } // namespace DesktopTranslate

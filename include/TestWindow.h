@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QVBoxLayout>
 #include <QTimer>
+#include <QPixmap>
 #include <chrono>
 
 namespace DesktopTranslate {
@@ -32,12 +33,18 @@ public:
     
     // 显示配置信息
     void showConfig(const QString& configInfo);
+    
+    // 显示截图预览
+    void showScreenshot(const QPixmap& pixmap);
+    void showScreenshot(const QImage& image);
+    void clearScreenshot();
 
 private:
     void setupUI();
 
     QLabel* status_label_{nullptr};
     QLabel* config_label_{nullptr};
+    QLabel* screenshot_label_{nullptr};
     QTextEdit* log_text_{nullptr};
     QPushButton* clear_button_{nullptr};
     QPushButton* test_api_button_{nullptr};

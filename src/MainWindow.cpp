@@ -203,6 +203,11 @@ void MainWindow::onSelectionComplete(const QRect& rect) {
             
             // 回到主线程处理结果
             QMetaObject::invokeMethod(this, [this, result, rect]() {
+                // 显示截图预览
+                if (!result.screenshot.isNull()) {
+                    test_window_->showScreenshot(result.screenshot);
+                }
+                
                 if (result.success && !result.text.isEmpty()) {
                     test_window_->log(tr("OCR 识别成功，获取到文本: %1").arg(
                         result.text.left(50) + (result.text.length() > 50 ? "..." : "")), "SUCCESS");

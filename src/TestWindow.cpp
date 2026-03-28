@@ -54,6 +54,23 @@ void TestWindow::setupUI() {
     
     mainLayout->addWidget(configGroup);
     
+    // 截图预览区域
+    auto* screenshotGroup = new QGroupBox(tr("截图预览"), this);
+    auto* screenshotLayout = new QVBoxLayout(screenshotGroup);
+    
+    screenshot_label_ = new QLabel(this);
+    screenshot_label_->setMinimumHeight(100);
+    screenshot_label_->setMaximumHeight(200);
+    screenshot_label_->setAlignment(Qt::AlignCenter);
+    screenshot_label_->setStyleSheet(
+        "QLabel { background-color: #2d2d2d; color: #666; border: 1px dashed #555; border-radius: 4px; }"
+    );
+    screenshot_label_->setText(tr("截图将在此显示"));
+    screenshot_label_->setScaledContents(false);
+    screenshotLayout->addWidget(screenshot_label_);
+    
+    mainLayout->addWidget(screenshotGroup);
+    
     // 日志区域
     auto* logGroup = new QGroupBox(tr("操作日志"), this);
     auto* logLayout = new QVBoxLayout(logGroup);
@@ -198,6 +215,43 @@ void TestWindow::setStatus(const QString& status, const QString& color) {
 
 void TestWindow::showConfig(const QString& configInfo) {
     config_label_->setText(configInfo);
+}
+
+void TestWindow::showScreenshot(const QPixmap& pixmap) {
+    if (pixmap.isNull()) {
+        screenshot_label_->setText(tr("截图失败"));
+        return;
+    }
+    
+    // 缩放图片以适应标签大小，保持宽高比
+    QPixmap scaledPixmap = pixmap.scaled(
+        screenshot_label_->size(),
+        Qt::KeepAspectRatio,
+        Qt::SmoothTransformation
+    );
+    screenshot_label_->setPixmap(scaledPixmap);
+    screenshot_label_->setStyleSheet(
+        "QLabel { background-color: #2d2d2d; border: 1px solid #4A90D9; border-radius: 4px; }"
+    );
+    
+    log(tr("截图尺寸: %1 x %2").arg(pixmap.width()).arg(pixmap.height()), "INFO");
+}
+
+void TestWindow::showScreenshot(const QImage& image) {
+    if (image.isNull()) {
+        screenshot_label_->setText(tr("截图失败"));
+        return;
+    }
+    
+    showScreenshot(QPixmap::fromImage(image));
+}
+
+void TestWindow::clearScreenshot() {
+    screenshot_label_->clear();
+    screenshot_label_->setText(tr("截图将在此显示"));
+    screenshot_label_->setStyleSheet(
+        "QLabel { background-color: #2d2d2d; color: #666; border: 1px dashed #555; border-radius: 4px; }"
+    );
 }
 
 } // namespace DesktopTranslate

@@ -15,6 +15,7 @@ struct OCRResult {
     bool success{false};
     QString text;
     QString error;
+    QImage screenshot;  // 截图图像
 };
 
 /**
