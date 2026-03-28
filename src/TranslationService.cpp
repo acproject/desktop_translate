@@ -31,6 +31,12 @@ TranslationService::TranslationService() {
     source_language_ = config.getSourceLanguage();
     target_language_ = config.getTargetLanguage();
     
+    qDebug() << "TranslationService initialized:";
+    qDebug() << "  API Host:" << QString::fromStdString(api_host_);
+    qDebug() << "  API Port:" << api_port_;
+    qDebug() << "  Model:" << QString::fromStdString(model_);
+    qDebug() << "  Timeout:" << timeout_ << "seconds";
+    
     // 初始化CURL
     curl_global_init(CURL_GLOBAL_ALL);
 }
@@ -73,6 +79,10 @@ std::string TranslationService::sendHttpRequest(const std::string& body) {
     
     // 构建URL
     std::string url = api_host_ + ":" + std::to_string(api_port_) + "/v1/chat/completions";
+    
+    qDebug() << "Sending request to:" << QString::fromStdString(url);
+    qDebug() << "Request body size:" << body.size() << "bytes";
+    qDebug() << "Timeout setting:" << timeout_ << "seconds";
     
     // 设置CURL选项
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());

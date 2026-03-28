@@ -72,7 +72,7 @@ private:
     int api_port_{8110};
     std::string api_key_{""};  // 本地服务通常不需要
     std::string model_{"Qwen3.5-122B-A10B-GGUF"};
-    int api_timeout_{60};
+    int api_timeout_{180};  // 默认3分钟，长文本需要更多时间
 
     // OCR 服务配置
     std::string ocr_endpoint_{"http://127.0.0.1"};

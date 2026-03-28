@@ -59,10 +59,10 @@ private:
     TranslationResult parseResponse(const std::string& response, const std::string& originalText);
 
     std::string api_host_{"http://127.0.0.1"};
-    int api_port_{8113};
+    int api_port_{8110};
     std::string api_key_{""};
-    std::string model_{"qwen2.5-7b-instruct"};
-    int timeout_{30};
+    std::string model_{"Qwen3.5-122B-A10B-GGUF"};
+    int timeout_{180};  // 默认3分钟
     std::string source_language_{"auto"};
     std::string target_language_{"zh"};
 };

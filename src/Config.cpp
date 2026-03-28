@@ -243,6 +243,11 @@ bool Config::load() {
 
         ocr_model_ = getJsonValue("ocr_model");
         if (ocr_model_.empty()) ocr_model_ = "gpt-4o";
+        
+        std::cout << "Config loaded successfully:" << std::endl;
+        std::cout << "  API Port: " << api_port_ << std::endl;
+        std::cout << "  API Timeout: " << api_timeout_ << std::endl;
+        std::cout << "  OCR Port: " << ocr_port_ << std::endl;
 
         return true;
     } catch (const std::exception& e) {

@@ -290,7 +290,7 @@ void MainWindow::onSettingsAction() {
     auto* keyEdit = new QLineEdit(QString::fromStdString(config.getApiKey()), &dialog);
     keyEdit->setEchoMode(QLineEdit::Password);
     auto* timeoutSpin = new QSpinBox(&dialog);
-    timeoutSpin->setRange(10, 300);
+    timeoutSpin->setRange(30, 600);  // 最小30秒，最大10分钟
     timeoutSpin->setValue(config.getApiTimeout());
     timeoutSpin->setSuffix(tr(" 秒"));
     
@@ -387,6 +387,7 @@ void MainWindow::onSettingsAction() {
         TranslationService::instance().setEndpoint(endpointEdit->text().toStdString(), portSpin->value());
         TranslationService::instance().setApiKey(keyEdit->text().toStdString());
         TranslationService::instance().setModel(modelEdit->text().toStdString());
+        TranslationService::instance().setTimeout(timeoutSpin->value());
         TranslationService::instance().setLanguages(sourceCombo->currentText().toStdString(), 
                                                      targetCombo->currentText().toStdString());
         
