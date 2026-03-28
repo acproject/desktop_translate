@@ -83,6 +83,43 @@ void Config::setTargetLanguage(const std::string& lang) {
     target_language_ = lang;
 }
 
+void Config::setApiTimeout(int timeout) {
+    api_timeout_ = timeout;
+}
+
+// OCR 配置方法
+std::string Config::getOcrEndpoint() const {
+    return ocr_endpoint_;
+}
+
+int Config::getOcrPort() const {
+    return ocr_port_;
+}
+
+std::string Config::getOcrApiKey() const {
+    return ocr_api_key_;
+}
+
+std::string Config::getOcrModel() const {
+    return ocr_model_;
+}
+
+void Config::setOcrEndpoint(const std::string& endpoint) {
+    ocr_endpoint_ = endpoint;
+}
+
+void Config::setOcrPort(int port) {
+    ocr_port_ = port;
+}
+
+void Config::setOcrApiKey(const std::string& key) {
+    ocr_api_key_ = key;
+}
+
+void Config::setOcrModel(const std::string& model) {
+    ocr_model_ = model;
+}
+
 std::string Config::getShortcutSelectTranslate() const {
     return shortcut_select_translate_;
 }
@@ -195,6 +232,18 @@ bool Config::load() {
         shortcut_clipboard_translate_ = getJsonValue("shortcut_clipboard_translate");
         if (shortcut_clipboard_translate_.empty()) shortcut_clipboard_translate_ = "Ctrl+F4";
 
+        // OCR 配置
+        ocr_endpoint_ = getJsonValue("ocr_endpoint");
+        if (ocr_endpoint_.empty()) ocr_endpoint_ = "http://127.0.0.1";
+
+        ocr_port_ = getIntJsonValue("ocr_port");
+        if (ocr_port_ == 0) ocr_port_ = 8111;
+
+        ocr_api_key_ = getJsonValue("ocr_api_key");
+
+        ocr_model_ = getJsonValue("ocr_model");
+        if (ocr_model_.empty()) ocr_model_ = "gpt-4o";
+
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Failed to load config: " << e.what() << std::endl;
@@ -227,7 +276,11 @@ bool Config::save() {
         file << "  \"selection_opacity\": " << selection_opacity_ << ",\n";
         file << "  \"selection_color\": \"" << selection_color_ << "\",\n";
         file << "  \"shortcut_select_translate\": \"" << shortcut_select_translate_ << "\",\n";
-        file << "  \"shortcut_clipboard_translate\": \"" << shortcut_clipboard_translate_ << "\"\n";
+        file << "  \"shortcut_clipboard_translate\": \"" << shortcut_clipboard_translate_ << "\",\n";
+        file << "  \"ocr_endpoint\": \"" << ocr_endpoint_ << "\",\n";
+        file << "  \"ocr_port\": " << ocr_port_ << ",\n";
+        file << "  \"ocr_api_key\": \"" << ocr_api_key_ << "\",\n";
+        file << "  \"ocr_model\": \"" << ocr_model_ << "\"\n";
         file << "}\n";
 
         file.close();

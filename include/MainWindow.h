@@ -5,7 +5,6 @@
 #include <QSystemTrayIcon>
 #include <QMenu>
 #include <QAction>
-#include <QShortcut>
 #include <memory>
 
 namespace DesktopTranslate {
@@ -73,10 +72,6 @@ private:
     
     // 测试窗口
     std::unique_ptr<TestWindow> test_window_;
-    
-    // 快捷键
-    std::unique_ptr<QShortcut> shortcut_select_;
-    std::unique_ptr<QShortcut> shortcut_clipboard_;
     
     // 当前选区位置
     QPoint current_selection_pos_;

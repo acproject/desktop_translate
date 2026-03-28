@@ -3,6 +3,7 @@
 #include <curl/curl.h>
 #include <sstream>
 #include <iostream>
+#include <QDebug>
 #include <nlohmann/json.hpp>
 
 namespace DesktopTranslate {
@@ -87,9 +88,16 @@ std::string TranslationService::sendHttpRequest(const std::string& body) {
     std::string contentType = "Content-Type: application/json";
     headers = curl_slist_append(headers, contentType.c_str());
     
+    // 如果API Key不为空，添加两种认证头
     if (!api_key_.empty()) {
         std::string authHeader = "Authorization: Bearer " + api_key_;
         headers = curl_slist_append(headers, authHeader.c_str());
+        
+        // 添加 api-key 头 (某些服务如Azure OpenAI需要)
+        std::string apiKeyHeader = "api-key: " + api_key_;
+        headers = curl_slist_append(headers, apiKeyHeader.c_str());
+        
+        qDebug() << "API Key set, adding Authorization and api-key headers";
     }
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     

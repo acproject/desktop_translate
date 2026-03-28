@@ -5,11 +5,15 @@
 #include "Config.h"
 #include "ClipboardManager.h"
 #include "TestWindow.h"
+#include "GlobalShortcut.h"
+#include "OCRService.h"
 #include <QApplication>
 #include <QMessageBox>
 #include <QInputDialog>
 #include <QThread>
+#include <QTimer>
 #include <QDebug>
+#include <thread>
 #include <QStyle>
 #include <QGroupBox>
 #include <QFormLayout>
@@ -85,13 +89,37 @@ void MainWindow::setupSystemTray() {
 void MainWindow::setupShortcuts() {
     auto& config = Config::instance();
     
-    // 框选翻译快捷键 - 从配置读取
-    shortcut_select_ = std::make_unique<QShortcut>(
-        QKeySequence(QString::fromStdString(config.getShortcutSelectTranslate())), this);
+    qDebug() << "Setting up global shortcuts using X11...";
+    qDebug() << "Select shortcut:" << QString::fromStdString(config.getShortcutSelectTranslate());
+    qDebug() << "Clipboard shortcut:" << QString::fromStdString(config.getShortcutClipboardTranslate());
     
-    // 剪贴板翻译快捷键 - 从配置读取
-    shortcut_clipboard_ = std::make_unique<QShortcut>(
-        QKeySequence(QString::fromStdString(config.getShortcutClipboardTranslate())), this);
+    // 使用 X11 全局快捷键
+    auto& globalShortcut = GlobalShortcut::instance();
+    
+    // 注册框选翻译快捷键
+    if (!globalShortcut.registerShortcut(
+            QString::fromStdString(config.getShortcutSelectTranslate()), "select_translate")) {
+        qWarning() << "Failed to register select shortcut";
+    }
+    
+    // 注册剪贴板翻译快捷键
+    if (!globalShortcut.registerShortcut(
+            QString::fromStdString(config.getShortcutClipboardTranslate()), "clipboard_translate")) {
+        qWarning() << "Failed to register clipboard shortcut";
+    }
+    
+    // 连接全局快捷键信号
+    connect(&globalShortcut, &GlobalShortcut::shortcutActivated, 
+            this, [this](const QString& id) {
+        qDebug() << "Global shortcut triggered:" << id;
+        if (id == "select_translate") {
+            startSelectionTranslation();
+        } else if (id == "clipboard_translate") {
+            translateFromClipboard();
+        }
+    });
+    
+    qDebug() << "Global shortcuts registered successfully";
 }
 
 void MainWindow::setupConnections() {
@@ -102,10 +130,6 @@ void MainWindow::setupConnections() {
     connect(action_settings_, &QAction::triggered, this, &MainWindow::onSettingsAction);
     connect(action_about_, &QAction::triggered, this, &MainWindow::onAboutAction);
     connect(action_exit_, &QAction::triggered, this, &MainWindow::onExitAction);
-    
-    // 快捷键连接
-    connect(shortcut_select_.get(), &QShortcut::activated, this, &MainWindow::startSelectionTranslation);
-    connect(shortcut_clipboard_.get(), &QShortcut::activated, this, &MainWindow::translateFromClipboard);
     
     // 选区覆盖层连接
     connect(selection_overlay_.get(), &SelectionOverlay::selectionComplete, 
@@ -162,25 +186,36 @@ void MainWindow::onSelectionComplete(const QRect& rect) {
     qDebug() << "MainWindow::onSelectionComplete called, rect:" << rect;
     
     test_window_->log(tr("选区完成: (%1,%2) %3x%4").arg(rect.x()).arg(rect.y()).arg(rect.width()).arg(rect.height()), "INFO");
-    test_window_->setStatus(tr("获取文本中"), "blue");
+    test_window_->setStatus(tr("OCR识别中"), "blue");
     
     current_selection_pos_ = rect.bottomRight();
     
-    // 获取选区文本
-    QString text = ClipboardManager::instance().getTextFromSelection(
-        rect.x(), rect.y(), rect.width(), rect.height()
-    );
+    // 使用 OCR 识别选区文本
+    test_window_->log(tr("正在对选区进行 OCR 识别..."), "INFO");
     
-    qDebug() << "Text from selection:" << text;
-    
-    if (text.isEmpty()) {
-        test_window_->log(tr("未能获取选区文本（可能需要安装 xdotool 和 xsel）"), "WARN");
-        tray_icon_->showMessage(tr("提示"), tr("未能获取选区文本"), QSystemTrayIcon::Warning, 2000);
-        return;
-    }
-    
-    test_window_->log(tr("获取到文本: %1").arg(text.left(50) + (text.length() > 50 ? "..." : "")), "INFO");
-    performTranslation(text);
+    // 延迟截图，确保覆盖层完全隐藏
+    QTimer::singleShot(100, this, [this, rect]() {
+        // 在后台线程进行 OCR 识别
+        std::thread([this, rect]() {
+            auto result = OCRService::instance().recognizeScreenArea(
+                rect.x(), rect.y(), rect.width(), rect.height()
+            );
+            
+            // 回到主线程处理结果
+            QMetaObject::invokeMethod(this, [this, result, rect]() {
+                if (result.success && !result.text.isEmpty()) {
+                    test_window_->log(tr("OCR 识别成功，获取到文本: %1").arg(
+                        result.text.left(50) + (result.text.length() > 50 ? "..." : "")), "SUCCESS");
+                    test_window_->setStatus(tr("翻译中"), "blue");
+                    performTranslation(result.text);
+                } else {
+                    test_window_->log(tr("OCR 识别失败: %1").arg(result.error), "ERROR");
+                    test_window_->setStatus(tr("OCR 失败"), "red");
+                    tray_icon_->showMessage(tr("OCR 识别失败"), result.error, QSystemTrayIcon::Warning, 2000);
+                }
+            }, Qt::QueuedConnection);
+        }).detach();
+    });
 }
 
 void MainWindow::onSelectionCancelled() {
@@ -239,7 +274,7 @@ void MainWindow::onSettingsAction() {
     auto* layout = new QVBoxLayout(&dialog);
     
     // API 设置
-    auto* apiGroup = new QGroupBox(tr("API 设置"), &dialog);
+    auto* apiGroup = new QGroupBox(tr("翻译 API 设置"), &dialog);
     auto* apiLayout = new QFormLayout(apiGroup);
     
     auto* endpointEdit = new QLineEdit(QString::fromStdString(config.getApiEndpoint()), &dialog);
@@ -249,13 +284,37 @@ void MainWindow::onSettingsAction() {
     auto* modelEdit = new QLineEdit(QString::fromStdString(config.getModel()), &dialog);
     auto* keyEdit = new QLineEdit(QString::fromStdString(config.getApiKey()), &dialog);
     keyEdit->setEchoMode(QLineEdit::Password);
+    auto* timeoutSpin = new QSpinBox(&dialog);
+    timeoutSpin->setRange(10, 300);
+    timeoutSpin->setValue(config.getApiTimeout());
+    timeoutSpin->setSuffix(tr(" 秒"));
     
     apiLayout->addRow(tr("API 地址:"), endpointEdit);
     apiLayout->addRow(tr("端口:"), portSpin);
     apiLayout->addRow(tr("模型:"), modelEdit);
     apiLayout->addRow(tr("API Key:"), keyEdit);
+    apiLayout->addRow(tr("超时时间:"), timeoutSpin);
     
     layout->addWidget(apiGroup);
+    
+    // OCR 设置
+    auto* ocrGroup = new QGroupBox(tr("OCR 服务设置"), &dialog);
+    auto* ocrLayout = new QFormLayout(ocrGroup);
+    
+    auto* ocrEndpointEdit = new QLineEdit(QString::fromStdString(config.getOcrEndpoint()), &dialog);
+    auto* ocrPortSpin = new QSpinBox(&dialog);
+    ocrPortSpin->setRange(1, 65535);
+    ocrPortSpin->setValue(config.getOcrPort());
+    auto* ocrModelEdit = new QLineEdit(QString::fromStdString(config.getOcrModel()), &dialog);
+    auto* ocrKeyEdit = new QLineEdit(QString::fromStdString(config.getOcrApiKey()), &dialog);
+    ocrKeyEdit->setEchoMode(QLineEdit::Password);
+    
+    ocrLayout->addRow(tr("OCR 地址:"), ocrEndpointEdit);
+    ocrLayout->addRow(tr("端口:"), ocrPortSpin);
+    ocrLayout->addRow(tr("模型:"), ocrModelEdit);
+    ocrLayout->addRow(tr("API Key:"), ocrKeyEdit);
+    
+    layout->addWidget(ocrGroup);
     
     // 翻译设置
     auto* transGroup = new QGroupBox(tr("翻译设置"), &dialog);
@@ -296,10 +355,20 @@ void MainWindow::onSettingsAction() {
     connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     
     if (dialog.exec() == QDialog::Accepted) {
+        // 保存翻译 API 配置
         config.setApiEndpoint(endpointEdit->text().toStdString());
         config.setApiPort(portSpin->value());
         config.setApiKey(keyEdit->text().toStdString());
         config.setModel(modelEdit->text().toStdString());
+        config.setApiTimeout(timeoutSpin->value());
+        
+        // 保存 OCR 配置
+        config.setOcrEndpoint(ocrEndpointEdit->text().toStdString());
+        config.setOcrPort(ocrPortSpin->value());
+        config.setOcrApiKey(ocrKeyEdit->text().toStdString());
+        config.setOcrModel(ocrModelEdit->text().toStdString());
+        
+        // 保存翻译语言配置
         config.setSourceLanguage(sourceCombo->currentText().toStdString());
         config.setTargetLanguage(targetCombo->currentText().toStdString());
         
@@ -316,11 +385,17 @@ void MainWindow::onSettingsAction() {
         TranslationService::instance().setLanguages(sourceCombo->currentText().toStdString(), 
                                                      targetCombo->currentText().toStdString());
         
-        // 更新快捷键
-        shortcut_select_->setKey(QKeySequence(selectShortcutEdit->text()));
-        shortcut_clipboard_->setKey(QKeySequence(clipboardShortcutEdit->text()));
-        action_select_translate_->setShortcut(QKeySequence(selectShortcutEdit->text()));
-        action_clipboard_translate_->setShortcut(QKeySequence(clipboardShortcutEdit->text()));
+        // 更新 OCR 服务配置
+        OCRService::instance().setEndpoint(ocrEndpointEdit->text().toStdString(), ocrPortSpin->value());
+        OCRService::instance().setApiKey(ocrKeyEdit->text().toStdString());
+        OCRService::instance().setModel(ocrModelEdit->text().toStdString());
+        
+        // 更新全局快捷键
+        auto& globalShortcut = GlobalShortcut::instance();
+        globalShortcut.unregisterShortcut("select_translate");
+        globalShortcut.unregisterShortcut("clipboard_translate");
+        globalShortcut.registerShortcut(selectShortcutEdit->text(), "select_translate");
+        globalShortcut.registerShortcut(clipboardShortcutEdit->text(), "clipboard_translate");
         
         // 更新测试窗口配置显示
         updateConfigDisplay();

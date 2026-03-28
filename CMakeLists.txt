@@ -13,6 +13,7 @@ set(CMAKE_AUTOUIC ON)
 # 查找依赖
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Network)
 find_package(CURL REQUIRED)
+find_package(X11 REQUIRED)
 
 # nlohmann_json - 使用 FetchContent 自动下载
 include(FetchContent)
@@ -33,6 +34,8 @@ set(SOURCES
     src/Config.cpp
     src/ClipboardManager.cpp
     src/TestWindow.cpp
+    src/GlobalShortcut.cpp
+    src/OCRService.cpp
 )
 
 set(HEADERS
@@ -43,6 +46,8 @@ set(HEADERS
     include/Config.h
     include/ClipboardManager.h
     include/TestWindow.h
+    include/GlobalShortcut.h
+    include/OCRService.h
 )
 
 # 可执行文件
@@ -64,6 +69,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Network
     CURL::libcurl
     nlohmann_json::nlohmann_json
+    ${X11_LIBRARIES}
 )
 
 # 编译选项
