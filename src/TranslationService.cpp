@@ -502,7 +502,15 @@ void TranslationService::setTimeout(int seconds) {
 
 void TranslationService::setLanguages(const std::string& source, const std::string& target) {
     source_language_ = source;
-    target_language_ = target;
+    if (model_.find("nllb") != std::string::npos) {
+        if (target == "zh") {
+            target_language_ = "zho_Hans";
+        } else {
+            target_language_ = target;
+        }
+    } else {
+        target_language_ = target;
+    }
 }
 
 } // namespace DesktopTranslate

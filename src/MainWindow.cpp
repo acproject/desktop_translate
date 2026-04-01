@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "HoverTranslateWindow.h"
 #include "SelectionOverlay.h"
 #include "TranslationResultWindow.h"
 #include "TranslationService.h"
@@ -48,6 +49,10 @@ void MainWindow::setupUI() {
     
     // 初始化测试窗口 - 使用nullptr作为父窗口使其成为独立窗口
     test_window_ = std::make_unique<TestWindow>(nullptr);
+
+    hover_translate_window_ = std::make_unique<HoverTranslateWindow>(nullptr);
+    hover_translate_window_->hide();
+    result_window_->hide();
 }
 
 void MainWindow::setupSystemTray() {
@@ -69,6 +74,7 @@ void MainWindow::setupSystemTray() {
     action_clipboard_translate_ = new QAction(tr("剪贴板翻译 (&C)"), this);
     action_clipboard_translate_->setShortcut(QKeySequence(QString::fromStdString(config.getShortcutClipboardTranslate())));
     action_test_window_ = new QAction(tr("显示测试窗口 (&T)"), this);
+    action_hover_window_ = new QAction(tr("悬浮拖放翻译 (&H)"), this);
     action_settings_ = new QAction(tr("设置 (&O)"), this);
     action_about_ = new QAction(tr("关于 (&A)"), this);
     action_exit_ = new QAction(tr("退出 (&X)"), this);
@@ -76,6 +82,7 @@ void MainWindow::setupSystemTray() {
     tray_menu_->addAction(action_select_translate_);
     tray_menu_->addAction(action_clipboard_translate_);
     tray_menu_->addAction(action_test_window_);
+    tray_menu_->addAction(action_hover_window_);
     tray_menu_->addSeparator();
     tray_menu_->addAction(action_settings_);
     tray_menu_->addAction(action_about_);
@@ -127,6 +134,7 @@ void MainWindow::setupConnections() {
     connect(action_select_translate_, &QAction::triggered, this, &MainWindow::startSelectionTranslation);
     connect(action_clipboard_translate_, &QAction::triggered, this, &MainWindow::translateFromClipboard);
     connect(action_test_window_, &QAction::triggered, this, &MainWindow::showTestWindow);
+    connect(action_hover_window_, &QAction::triggered, this, &MainWindow::toggleHoverWindow);
     connect(action_settings_, &QAction::triggered, this, &MainWindow::onSettingsAction);
     connect(action_about_, &QAction::triggered, this, &MainWindow::onAboutAction);
     connect(action_exit_, &QAction::triggered, this, &MainWindow::onExitAction);
@@ -150,6 +158,9 @@ void MainWindow::setupConnections() {
         current_selection_pos_ = QPoint(100, 100);  // 默认位置
         performTranslation(text);
     });
+
+    connect(hover_translate_window_.get(), &HoverTranslateWindow::translateRequested,
+            this, &MainWindow::onHoverTranslateRequested);
     
     // 更新测试窗口配置显示
     updateConfigDisplay();
@@ -232,6 +243,9 @@ void MainWindow::onSelectionCancelled() {
 void MainWindow::performTranslation(const QString& text) {
     test_window_->log(tr("开始翻译..."), "INFO");
     test_window_->setStatus(tr("翻译中"), "blue");
+    if (hover_translate_window_) {
+        hover_translate_window_->setBusy(true);
+    }
     
     // 显示翻译中提示
     tray_icon_->showMessage(tr("翻译中"), tr("正在请求翻译服务..."), QSystemTrayIcon::Information, 1000);
@@ -252,6 +266,10 @@ void MainWindow::performTranslation(const QString& text) {
 }
 
 void MainWindow::onTranslationComplete(const TranslationResult& result) {
+    if (hover_translate_window_) {
+        hover_translate_window_->setBusy(false);
+    }
+
     if (result.success) {
         test_window_->log(tr("翻译成功!"), "SUCCESS");
         test_window_->setStatus(tr("翻译成功"), "green");
@@ -267,6 +285,26 @@ void MainWindow::onTranslationComplete(const TranslationResult& result) {
         result_window_->setResult(result.original_text, result.error_message, false);
         result_window_->showNear(current_selection_pos_);
     }
+}
+
+void MainWindow::onHoverTranslateRequested(const QString& text, const QPoint& globalPosition) {
+    current_selection_pos_ = globalPosition;
+    test_window_->log(tr("收到悬浮拖放/PRIMARY 文本: %1").arg(text.left(50) + (text.length() > 50 ? "..." : "")), "INFO");
+    performTranslation(text);
+}
+
+void MainWindow::toggleHoverWindow() {
+    if (!hover_translate_window_) {
+        return;
+    }
+
+    if (hover_translate_window_->isVisible()) {
+        hover_translate_window_->hide();
+        return;
+    }
+
+    hover_translate_window_->show();
+    hover_translate_window_->raise();
 }
 
 void MainWindow::onSettingsAction() {

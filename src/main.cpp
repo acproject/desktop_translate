@@ -28,10 +28,6 @@ int main(int argc, char* argv[]) {
         // 创建主窗口
         DesktopTranslate::MainWindow mainWindow;
         
-        std::cout << "Showing test window..." << std::endl;
-        // 默认显示测试窗口
-        mainWindow.showTestWindow();
-        
         std::cout << "Desktop Translate started." << std::endl;
         std::cout << "Press Ctrl+F3 to start selection translation." << std::endl;
         std::cout << "Press Ctrl+F4 to translate from clipboard." << std::endl;

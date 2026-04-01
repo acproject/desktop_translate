@@ -1,11 +1,14 @@
 #include "TranslationResultWindow.h"
 #include <QApplication>
 #include <QClipboard>
+#include <QGuiApplication>
+#include <QTextDocument>
 #include <QScreen>
-#include <QDebug>
 #include <QTimer>
 #include <QKeyEvent>
 #include <QCloseEvent>
+#include <QHBoxLayout>
+#include <QVBoxLayout>
 
 namespace DesktopTranslate {
 
@@ -17,132 +20,161 @@ TranslationResultWindow::TranslationResultWindow(QWidget* parent)
 }
 
 void TranslationResultWindow::setupUI() {
-    // 窗口设置
     setWindowTitle(tr("翻译结果"));
-    setWindowFlags(Qt::Window | Qt::WindowStaysOnTopHint);
-    setMinimumSize(400, 300);
-    resize(500, 400);
-    
-    // 主布局
+    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    setAttribute(Qt::WA_ShowWithoutActivating);
+    resize(360, 160);
+
     auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(10, 10, 10, 10);
+    mainLayout->setContentsMargins(12, 12, 12, 12);
     mainLayout->setSpacing(8);
-    
-    // 状态标签
+
     status_label_ = new QLabel(this);
-    status_label_->setStyleSheet("font-weight: bold; padding: 5px;");
+    status_label_->setStyleSheet("font-weight: 600; font-size: 12px;");
     mainLayout->addWidget(status_label_);
-    
-    // 原文区域
-    original_label_ = new QLabel(tr("原文:"), this);
-    original_label_->setStyleSheet("font-weight: bold; color: #666;");
-    mainLayout->addWidget(original_label_);
-    
-    original_text_ = new QTextEdit(this);
-    original_text_->setReadOnly(true);
-    original_text_->setMaximumHeight(100);
-    original_text_->setStyleSheet(
-        "QTextEdit { background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; padding: 5px; }"
-    );
+
+    original_text_ = new QLabel(this);
+    original_text_->setWordWrap(true);
+    original_text_->setStyleSheet("color: #444444; font-size: 12px;");
     mainLayout->addWidget(original_text_);
-    
-    // 译文区域
-    translated_label_ = new QLabel(tr("译文:"), this);
-    translated_label_->setStyleSheet("font-weight: bold; color: #333;");
-    mainLayout->addWidget(translated_label_);
-    
-    translated_text_ = new QTextEdit(this);
+
+    translated_text_ = new QTextBrowser(this);
     translated_text_->setReadOnly(true);
+    translated_text_->setFrameShape(QFrame::NoFrame);
+    translated_text_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    translated_text_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    translated_text_->setOpenExternalLinks(false);
     translated_text_->setStyleSheet(
-        "QTextEdit { background-color: #fff; border: 2px solid #4A90D9; border-radius: 4px; padding: 5px; }"
+        "QTextBrowser {"
+        "background-color: rgba(255, 255, 255, 0.92);"
+        "border: none;"
+        "border-radius: 10px;"
+        "padding: 8px;"
+        "color: #111111;"
+        "font-size: 14px;"
+        "}"
     );
     mainLayout->addWidget(translated_text_);
-    
-    // 按钮区域
+
     auto* buttonLayout = new QHBoxLayout();
-    buttonLayout->addStretch();
-    
-    copy_button_ = new QPushButton(tr("复制译文"), this);
-    copy_button_->setFixedWidth(100);
+    pin_button_ = new QPushButton(tr("钉住"), this);
+    pin_button_->setStyleSheet(
+        "QPushButton { background-color: rgba(74, 144, 217, 0.14); color: #1D4F91; border: 1px solid rgba(74, 144, 217, 0.30); border-radius: 6px; padding: 6px 12px; }"
+        "QPushButton:hover { background-color: rgba(74, 144, 217, 0.22); }"
+    );
+    buttonLayout->addWidget(pin_button_);
+
+    copy_button_ = new QPushButton(tr("复制"), this);
     copy_button_->setStyleSheet(
-        "QPushButton { background-color: #4A90D9; color: white; border: none; border-radius: 4px; padding: 8px; }"
+        "QPushButton { background-color: #4A90D9; color: white; border: none; border-radius: 6px; padding: 6px 12px; }"
         "QPushButton:hover { background-color: #357ABD; }"
-        "QPushButton:pressed { background-color: #2a5f8f; }"
     );
     buttonLayout->addWidget(copy_button_);
-    
-    close_button_ = new QPushButton(tr("关闭"), this);
-    close_button_->setFixedWidth(80);
+
+    buttonLayout->addStretch();
+
+    close_button_ = new QPushButton(tr("×"), this);
+    close_button_->setFixedSize(28, 28);
     close_button_->setStyleSheet(
-        "QPushButton { background-color: #6c757d; color: white; border: none; border-radius: 4px; padding: 8px; }"
-        "QPushButton:hover { background-color: #5a6268; }"
-        "QPushButton:pressed { background-color: #545b62; }"
+        "QPushButton { background-color: rgba(0, 0, 0, 0.08); color: #333333; border: none; border-radius: 14px; font-size: 15px; }"
+        "QPushButton:hover { background-color: rgba(0, 0, 0, 0.14); }"
     );
     buttonLayout->addWidget(close_button_);
-    
+
     mainLayout->addLayout(buttonLayout);
-    
-    // 窗口样式
+
     setStyleSheet(
-        "QWidget { font-family: 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif; font-size: 13px; }"
+        "TranslationResultWindow {"
+        "background-color: rgba(255, 255, 255, 0.97);"
+        "border: 1px solid rgba(0, 0, 0, 0.12);"
+        "border-radius: 14px;"
+        "font-family: 'Microsoft YaHei', 'WenQuanYi Micro Hei', sans-serif;"
+        "font-size: 13px;"
+        "}"
     );
+
+    auto_close_timer_ = new QTimer(this);
+    auto_close_timer_->setSingleShot(true);
+    updatePinState();
 }
 
 void TranslationResultWindow::setupConnections() {
+    connect(pin_button_, &QPushButton::clicked, this, [this]() {
+        pinned_ = !pinned_;
+        updatePinState();
+        if (pinned_) {
+            auto_close_timer_->stop();
+        } else {
+            auto_close_timer_->start(12000);
+        }
+    });
+
     connect(copy_button_, &QPushButton::clicked, this, [this]() {
         QString text = translated_text_->toPlainText();
         QApplication::clipboard()->setText(text);
-        copy_button_->setText(tr("已复制!"));
+        emit copyRequested(text);
+        copy_button_->setText(tr("已复制"));
         QTimer::singleShot(2000, [this]() {
-            copy_button_->setText(tr("复制译文"));
+            copy_button_->setText(tr("复制"));
         });
     });
-    
+
     connect(close_button_, &QPushButton::clicked, this, &QWidget::close);
+    connect(auto_close_timer_, &QTimer::timeout, this, &QWidget::hide);
 }
 
 void TranslationResultWindow::setResult(const std::string& original, const std::string& translated, bool success) {
-    original_text_->setPlainText(QString::fromStdString(original));
-    
+    QString originalText = QString::fromStdString(original).trimmed();
+    QString translatedText = QString::fromStdString(translated).trimmed();
+
+    if (originalText.size() > 140) {
+        originalText = originalText.left(140) + "...";
+    }
+
+    original_text_->setText(originalText);
+    original_text_->setVisible(!originalText.isEmpty());
+
     if (success) {
-        translated_text_->setPlainText(QString::fromStdString(translated));
-        status_label_->setText(tr("✓ 翻译成功"));
-        status_label_->setStyleSheet("font-weight: bold; color: green; padding: 5px;");
+        translated_text_->setPlainText(translatedText);
+        status_label_->setText(tr("翻译结果"));
+        status_label_->setStyleSheet("font-weight: 600; font-size: 12px; color: #188038;");
     } else {
-        translated_text_->setPlainText(QString::fromStdString(translated));
-        status_label_->setText(tr("✗ 翻译失败"));
-        status_label_->setStyleSheet("font-weight: bold; color: red; padding: 5px;");
+        translated_text_->setPlainText(translatedText);
+        status_label_->setText(tr("翻译失败"));
+        status_label_->setStyleSheet("font-weight: 600; font-size: 12px; color: #C62828;");
+    }
+
+    updateBubbleSize();
+    if (pinned_) {
+        auto_close_timer_->stop();
+    } else {
+        auto_close_timer_->start(12000);
     }
 }
 
 void TranslationResultWindow::showNear(const QPoint& position) {
-    // 获取屏幕信息
     auto screen = QGuiApplication::screenAt(position);
     if (!screen) {
         screen = QGuiApplication::primaryScreen();
     }
-    auto screenGeometry = screen->geometry();
-    
-    // 计算窗口位置
-    QPoint showPos = position;
-    
-    // 确保窗口在屏幕内
+    const QRect screenGeometry = screen->availableGeometry();
+
+    QPoint showPos = position + QPoint(16, 16);
     if (showPos.x() + width() > screenGeometry.right()) {
-        showPos.setX(screenGeometry.right() - width());
+        showPos.setX(position.x() - width() - 16);
     }
     if (showPos.y() + height() > screenGeometry.bottom()) {
-        showPos.setY(position.y() - height());
+        showPos.setY(position.y() - height() - 16);
     }
     if (showPos.x() < screenGeometry.left()) {
-        showPos.setX(screenGeometry.left());
+        showPos.setX(screenGeometry.left() + 8);
     }
     if (showPos.y() < screenGeometry.top()) {
-        showPos.setY(screenGeometry.top());
+        showPos.setY(screenGeometry.top() + 8);
     }
-    
+
     move(showPos);
     show();
-    activateWindow();
     raise();
 }
 
@@ -150,6 +182,9 @@ void TranslationResultWindow::clear() {
     original_text_->clear();
     translated_text_->clear();
     status_label_->clear();
+    auto_close_timer_->stop();
+    pinned_ = false;
+    updatePinState();
 }
 
 void TranslationResultWindow::keyPressEvent(QKeyEvent* event) {
@@ -162,6 +197,33 @@ void TranslationResultWindow::keyPressEvent(QKeyEvent* event) {
 void TranslationResultWindow::closeEvent(QCloseEvent* event) {
     emit closed();
     QWidget::closeEvent(event);
+}
+
+void TranslationResultWindow::updateBubbleSize() {
+    constexpr int bubbleWidth = 360;
+    constexpr int minTextHeight = 64;
+    constexpr int maxTextHeight = 220;
+
+    translated_text_->setFixedWidth(bubbleWidth - 24);
+    translated_text_->document()->setTextWidth(translated_text_->viewport()->width() - 8);
+
+    const int textHeight = qBound(
+        minTextHeight,
+        static_cast<int>(translated_text_->document()->size().height()) + 16,
+        maxTextHeight
+    );
+
+    translated_text_->setFixedHeight(textHeight);
+    setFixedWidth(bubbleWidth);
+    adjustSize();
+}
+
+void TranslationResultWindow::updatePinState() {
+    if (!pin_button_) {
+        return;
+    }
+
+    pin_button_->setText(pinned_ ? tr("取消钉住") : tr("钉住"));
 }
 
 } // namespace DesktopTranslate

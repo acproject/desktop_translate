@@ -28,6 +28,7 @@ FetchContent_MakeAvailable(json)
 set(SOURCES
     src/main.cpp
     src/MainWindow.cpp
+    src/HoverTranslateWindow.cpp
     src/SelectionOverlay.cpp
     src/TranslationService.cpp
     src/TranslationResultWindow.cpp
@@ -40,6 +41,7 @@ set(SOURCES
 
 set(HEADERS
     include/MainWindow.h
+    include/HoverTranslateWindow.h
     include/SelectionOverlay.h
     include/TranslationService.h
     include/TranslationResultWindow.h

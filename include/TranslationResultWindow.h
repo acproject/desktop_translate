@@ -2,12 +2,11 @@
 #define TRANSLATION_RESULT_WINDOW_H
 
 #include <QWidget>
-#include <QTextEdit>
+#include <QPoint>
+#include <QTextBrowser>
 #include <QPushButton>
 #include <QLabel>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <memory>
+#include <QTimer>
 #include <string>
 
 namespace DesktopTranslate {
@@ -45,14 +44,17 @@ protected:
 private:
     void setupUI();
     void setupConnections();
+    void updateBubbleSize();
+    void updatePinState();
 
-    QLabel* original_label_{nullptr};
-    QTextEdit* original_text_{nullptr};
-    QLabel* translated_label_{nullptr};
-    QTextEdit* translated_text_{nullptr};
+    QLabel* original_text_{nullptr};
+    QTextBrowser* translated_text_{nullptr};
+    QPushButton* pin_button_{nullptr};
     QPushButton* copy_button_{nullptr};
     QPushButton* close_button_{nullptr};
     QLabel* status_label_{nullptr};
+    QTimer* auto_close_timer_{nullptr};
+    bool pinned_{false};
 };
 
 } // namespace DesktopTranslate

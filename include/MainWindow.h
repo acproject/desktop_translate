@@ -2,6 +2,8 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QPoint>
+#include <QString>
 #include <QSystemTrayIcon>
 #include <QMenu>
 #include <QAction>
@@ -13,6 +15,7 @@ class SelectionOverlay;
 class TranslationResultWindow;
 class TestWindow;
 class Config;
+class HoverTranslateWindow;
 
 /**
  * @brief 主窗口类 - 系统托盘应用
@@ -42,6 +45,8 @@ private slots:
     void onAboutAction();
     void onExitAction();
     void onTestApiConnection();
+    void onHoverTranslateRequested(const QString& text, const QPoint& globalPosition);
+    void toggleHoverWindow();
 
 private:
     void setupUI();
@@ -63,6 +68,7 @@ private:
     QAction* action_about_{nullptr};
     QAction* action_exit_{nullptr};
     QAction* action_test_window_{nullptr};
+    QAction* action_hover_window_{nullptr};
     
     // 选区覆盖层
     std::unique_ptr<SelectionOverlay> selection_overlay_;
@@ -72,6 +78,7 @@ private:
     
     // 测试窗口
     std::unique_ptr<TestWindow> test_window_;
+    std::unique_ptr<HoverTranslateWindow> hover_translate_window_;
     
     // 当前选区位置
     QPoint current_selection_pos_;
