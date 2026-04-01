@@ -33,7 +33,7 @@ QIcon loadApplicationIcon() {
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("DesktopTranslate");
-    app.setApplicationVersion("1.0.2");
+    app.setApplicationVersion("1.0.4");
     app.setDesktopFileName("desktop-translate");
     app.setQuitOnLastWindowClosed(false);  // 关闭窗口不退出应用（托盘应用）
     const QIcon appIcon = loadApplicationIcon();

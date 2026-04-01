@@ -128,12 +128,20 @@ std::string Config::getShortcutClipboardTranslate() const {
     return shortcut_clipboard_translate_;
 }
 
+std::string Config::getShortcutHoverTranslationToggle() const {
+    return shortcut_hover_translation_toggle_;
+}
+
 void Config::setShortcutSelectTranslate(const std::string& shortcut) {
     shortcut_select_translate_ = shortcut;
 }
 
 void Config::setShortcutClipboardTranslate(const std::string& shortcut) {
     shortcut_clipboard_translate_ = shortcut;
+}
+
+void Config::setShortcutHoverTranslationToggle(const std::string& shortcut) {
+    shortcut_hover_translation_toggle_ = shortcut;
 }
 
 bool Config::load() {
@@ -232,6 +240,9 @@ bool Config::load() {
         shortcut_clipboard_translate_ = getJsonValue("shortcut_clipboard_translate");
         if (shortcut_clipboard_translate_.empty()) shortcut_clipboard_translate_ = "Ctrl+F4";
 
+        shortcut_hover_translation_toggle_ = getJsonValue("shortcut_hover_translation_toggle");
+        if (shortcut_hover_translation_toggle_.empty()) shortcut_hover_translation_toggle_ = "Ctrl+F8";
+
         // OCR 配置
         ocr_endpoint_ = getJsonValue("ocr_endpoint");
         if (ocr_endpoint_.empty()) ocr_endpoint_ = "http://127.0.0.1";
@@ -282,6 +293,7 @@ bool Config::save() {
         file << "  \"selection_color\": \"" << selection_color_ << "\",\n";
         file << "  \"shortcut_select_translate\": \"" << shortcut_select_translate_ << "\",\n";
         file << "  \"shortcut_clipboard_translate\": \"" << shortcut_clipboard_translate_ << "\",\n";
+        file << "  \"shortcut_hover_translation_toggle\": \"" << shortcut_hover_translation_toggle_ << "\",\n";
         file << "  \"ocr_endpoint\": \"" << ocr_endpoint_ << "\",\n";
         file << "  \"ocr_port\": " << ocr_port_ << ",\n";
         file << "  \"ocr_api_key\": \"" << ocr_api_key_ << "\",\n";

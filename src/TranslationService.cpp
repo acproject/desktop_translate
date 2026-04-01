@@ -1,5 +1,7 @@
 #include "TranslationService.h"
 #include "Config.h"
+#include <QByteArray>
+#include <QString>
 #include <curl/curl.h>
 #include <cctype>
 #include <sstream>
@@ -43,6 +45,59 @@ std::string normalizeLineEndings(const std::string& value) {
     }
 
     return normalized;
+}
+
+std::string sanitizeTextForRequest(const std::string& value) {
+    const QString decoded = QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
+    const QString normalized = decoded.normalized(QString::NormalizationForm_KC);
+
+    QString cleaned;
+    cleaned.reserve(normalized.size());
+
+    int removedCount = 0;
+    for (const QChar& character : normalized) {
+        const char32_t codePoint = character.unicode();
+
+        if (character == u'\r' || character == u'\n' || character == u'\t') {
+            cleaned += character;
+            continue;
+        }
+
+        if (character.isSpace()) {
+            cleaned += u' ';
+            continue;
+        }
+
+        if (codePoint == 0x2028 || codePoint == 0x2029) {
+            cleaned += u'\n';
+            continue;
+        }
+
+        if (codePoint == 0x00AD
+            || codePoint == 0x200B
+            || codePoint == 0x200C
+            || codePoint == 0x200D
+            || codePoint == 0x2060
+            || codePoint == 0xFEFF
+            || (codePoint >= 0x202A && codePoint <= 0x202E)
+            || (codePoint >= 0x2066 && codePoint <= 0x2069)
+            || character.category() == QChar::Other_Control
+            || character.category() == QChar::Other_Format
+            || character.category() == QChar::Other_Surrogate
+            || character.category() == QChar::Other_PrivateUse
+            || character.category() == QChar::Other_NotAssigned) {
+            ++removedCount;
+            continue;
+        }
+
+        cleaned += character;
+    }
+
+    if (removedCount > 0) {
+        qDebug() << "Sanitized translation input by removing" << removedCount << "unsafe characters";
+    }
+
+    return cleaned.toUtf8().toStdString();
 }
 
 bool isBulletLine(const std::string& line) {
@@ -352,7 +407,7 @@ std::string TranslationService::sendHttpRequest(const std::string& body) {
     
     // 设置请求头
     struct curl_slist* headers = nullptr;
-    std::string contentType = "Content-Type: application/json";
+    std::string contentType = "Content-Type: application/json; charset=utf-8";
     headers = curl_slist_append(headers, contentType.c_str());
     headers = curl_slist_append(headers, "Accept: application/json");
     
@@ -451,10 +506,15 @@ TranslationResult TranslationService::translate(const std::string& text) {
     result.original_text = text;
     
     try {
-        const std::string normalizedText = preprocessTextForTranslation(text);
-        const std::string& requestText = normalizedText.empty() ? text : normalizedText;
+        const std::string sanitizedText = sanitizeTextForRequest(text);
+        const std::string normalizedText = preprocessTextForTranslation(sanitizedText);
+        const std::string& requestText = normalizedText.empty() ? sanitizedText : normalizedText;
 
-        if (requestText != text) {
+        if (sanitizedText != text) {
+            qDebug() << "Sanitized translation input preview:" << QString::fromStdString(sanitizedText.substr(0, 300));
+        }
+
+        if (requestText != sanitizedText) {
             qDebug() << "Normalized translation input preview:" << QString::fromStdString(requestText.substr(0, 300));
         }
 

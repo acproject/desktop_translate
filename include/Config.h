@@ -37,8 +37,10 @@ public:
     // 快捷键配置
     std::string getShortcutSelectTranslate() const;
     std::string getShortcutClipboardTranslate() const;
+    std::string getShortcutHoverTranslationToggle() const;
     void setShortcutSelectTranslate(const std::string& shortcut);
     void setShortcutClipboardTranslate(const std::string& shortcut);
+    void setShortcutHoverTranslationToggle(const std::string& shortcut);
 
     // 设置方法
     void setApiEndpoint(const std::string& endpoint);
@@ -89,6 +91,7 @@ private:
     // 快捷键配置
     std::string shortcut_select_translate_{"Ctrl+F3"};
     std::string shortcut_clipboard_translate_{"Ctrl+F4"};
+    std::string shortcut_hover_translation_toggle_{"Ctrl+F8"};
 };
 
 } // namespace DesktopTranslate

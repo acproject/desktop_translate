@@ -106,6 +106,7 @@ void MainWindow::setupSystemTray() {
     action_clipboard_translate_->setShortcut(QKeySequence(QString::fromStdString(config.getShortcutClipboardTranslate())));
     action_test_window_ = new QAction(tr("显示测试窗口 (&T)"), this);
     action_hover_window_ = new QAction(tr("悬浮气泡翻译 (&H)"), this);
+    action_hover_window_->setShortcut(QKeySequence(QString::fromStdString(config.getShortcutHoverTranslationToggle())));
     action_hover_window_->setCheckable(true);
     action_hover_window_->setChecked(hover_translation_enabled_);
     action_settings_ = new QAction(tr("设置 (&O)"), this);
@@ -132,6 +133,7 @@ void MainWindow::setupShortcuts() {
     qDebug() << "Setting up global shortcuts using X11...";
     qDebug() << "Select shortcut:" << QString::fromStdString(config.getShortcutSelectTranslate());
     qDebug() << "Clipboard shortcut:" << QString::fromStdString(config.getShortcutClipboardTranslate());
+    qDebug() << "Hover toggle shortcut:" << QString::fromStdString(config.getShortcutHoverTranslationToggle());
     
     // 使用 X11 全局快捷键
     auto& globalShortcut = GlobalShortcut::instance();
@@ -147,6 +149,11 @@ void MainWindow::setupShortcuts() {
             QString::fromStdString(config.getShortcutClipboardTranslate()), "clipboard_translate")) {
         qWarning() << "Failed to register clipboard shortcut";
     }
+
+    if (!globalShortcut.registerShortcut(
+            QString::fromStdString(config.getShortcutHoverTranslationToggle()), "hover_translation_toggle")) {
+        qWarning() << "Failed to register hover translation toggle shortcut";
+    }
     
     // 连接全局快捷键信号
     connect(&globalShortcut, &GlobalShortcut::shortcutActivated, 
@@ -156,6 +163,8 @@ void MainWindow::setupShortcuts() {
             startSelectionTranslation();
         } else if (id == "clipboard_translate") {
             translateFromClipboard();
+        } else if (id == "hover_translation_toggle") {
+            action_hover_window_->setChecked(!action_hover_window_->isChecked());
         }
     });
     
@@ -471,9 +480,12 @@ void MainWindow::onSettingsAction() {
     selectShortcutEdit->setPlaceholderText(tr("例如: Ctrl+F3"));
     auto* clipboardShortcutEdit = new QLineEdit(QString::fromStdString(config.getShortcutClipboardTranslate()), &dialog);
     clipboardShortcutEdit->setPlaceholderText(tr("例如: Ctrl+F4"));
+    auto* hoverShortcutEdit = new QLineEdit(QString::fromStdString(config.getShortcutHoverTranslationToggle()), &dialog);
+    hoverShortcutEdit->setPlaceholderText(tr("例如: Ctrl+F8"));
     
     shortcutLayout->addRow(tr("框选翻译:"), selectShortcutEdit);
     shortcutLayout->addRow(tr("剪贴板翻译:"), clipboardShortcutEdit);
+    shortcutLayout->addRow(tr("悬浮气泡翻译开关:"), hoverShortcutEdit);
     
     layout->addWidget(shortcutGroup);
     
@@ -505,6 +517,7 @@ void MainWindow::onSettingsAction() {
         // 保存快捷键设置
         config.setShortcutSelectTranslate(selectShortcutEdit->text().toStdString());
         config.setShortcutClipboardTranslate(clipboardShortcutEdit->text().toStdString());
+        config.setShortcutHoverTranslationToggle(hoverShortcutEdit->text().toStdString());
         
         config.save();
         
@@ -525,8 +538,13 @@ void MainWindow::onSettingsAction() {
         auto& globalShortcut = GlobalShortcut::instance();
         globalShortcut.unregisterShortcut("select_translate");
         globalShortcut.unregisterShortcut("clipboard_translate");
+        globalShortcut.unregisterShortcut("hover_translation_toggle");
         globalShortcut.registerShortcut(selectShortcutEdit->text(), "select_translate");
         globalShortcut.registerShortcut(clipboardShortcutEdit->text(), "clipboard_translate");
+        globalShortcut.registerShortcut(hoverShortcutEdit->text(), "hover_translation_toggle");
+        action_select_translate_->setShortcut(QKeySequence(selectShortcutEdit->text()));
+        action_clipboard_translate_->setShortcut(QKeySequence(clipboardShortcutEdit->text()));
+        action_hover_window_->setShortcut(QKeySequence(hoverShortcutEdit->text()));
         
         // 更新测试窗口配置显示
         updateConfigDisplay();
@@ -539,13 +557,17 @@ void MainWindow::onSettingsAction() {
 void MainWindow::onAboutAction() {
     QMessageBox::about(this, tr("关于"),
         tr("<h3>桌面翻译工具</h3>"
-           "<p>版本: 1.0.2</p>"
+           "<p>版本: 1.0.4</p>"
            "<p>一个简单的桌面翻译工具，支持框选翻译。</p>"
            "<p>使用本地大模型API（OpenAI兼容）进行翻译。</p>"
            "<hr>"
            "<p><b>快捷键:</b></p>"
-           "<p>Ctrl+Shift+S - 框选翻译</p>"
-           "<p>Ctrl+Shift+C - 剪贴板翻译</p>"));
+           "<p>%1 - 框选翻译</p>"
+           "<p>%2 - 剪贴板翻译</p>"
+           "<p>%3 - 悬浮气泡翻译开关</p>")
+            .arg(QString::fromStdString(Config::instance().getShortcutSelectTranslate()))
+            .arg(QString::fromStdString(Config::instance().getShortcutClipboardTranslate()))
+            .arg(QString::fromStdString(Config::instance().getShortcutHoverTranslationToggle())));
 }
 
 void MainWindow::onExitAction() {
@@ -611,7 +633,8 @@ void MainWindow::updateConfigDisplay() {
         "目标语言: %5\n"
         "超时: %6秒\n"
         "框选翻译快捷键: %7\n"
-        "剪贴板翻译快捷键: %8"
+        "剪贴板翻译快捷键: %8\n"
+        "悬浮气泡翻译开关快捷键: %9"
     ).arg(QString::fromStdString(config.getApiEndpoint()))
      .arg(config.getApiPort())
      .arg(QString::fromStdString(config.getModel()))
@@ -619,7 +642,8 @@ void MainWindow::updateConfigDisplay() {
      .arg(QString::fromStdString(config.getTargetLanguage()))
      .arg(config.getApiTimeout())
      .arg(QString::fromStdString(config.getShortcutSelectTranslate()))
-     .arg(QString::fromStdString(config.getShortcutClipboardTranslate()));
+     .arg(QString::fromStdString(config.getShortcutClipboardTranslate()))
+     .arg(QString::fromStdString(config.getShortcutHoverTranslationToggle()));
     
     test_window_->showConfig(configInfo);
 }
