@@ -1,2 +1,5 @@
 build
 build-debug
+.deb-package
+build-release
+dist
