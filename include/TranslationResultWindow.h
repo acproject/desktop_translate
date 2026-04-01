@@ -9,6 +9,12 @@
 #include <QTimer>
 #include <string>
 
+class QCloseEvent;
+class QDragEnterEvent;
+class QDropEvent;
+class QKeyEvent;
+class QMouseEvent;
+
 namespace DesktopTranslate {
 
 /**
@@ -33,12 +39,19 @@ public:
 signals:
     // 复制到剪贴板信号
     void copyRequested(const QString& text);
+    void translateRequested(const QString& text, const QPoint& globalPosition);
     
     // 关闭信号
     void closed();
 
 protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
 
 private:
@@ -55,6 +68,8 @@ private:
     QLabel* status_label_{nullptr};
     QTimer* auto_close_timer_{nullptr};
     bool pinned_{false};
+    bool dragging_{false};
+    QPoint drag_offset_;
 };
 
 } // namespace DesktopTranslate

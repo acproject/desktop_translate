@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(desktop_translate VERSION 1.0.0 LANGUAGES CXX)
+project(desktop_translate VERSION 1.0.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -63,6 +63,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    DESKTOP_TRANSLATE_SOURCE_ICON="${CMAKE_CURRENT_SOURCE_DIR}/Icons8/icons8-translate-100.png"
+)
+
 # 链接库
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Core
@@ -83,4 +87,16 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 # 安装
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
+)
+
+install(FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/Icons8/icons8-translate-100.png
+    DESTINATION share/pixmaps
+    RENAME desktop-translate.png
+)
+
+install(FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/Icons8/icons8-translate-100.png
+    DESTINATION share/icons/hicolor/128x128/apps
+    RENAME desktop-translate.png
 )

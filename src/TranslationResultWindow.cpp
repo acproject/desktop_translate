@@ -1,12 +1,17 @@
 #include "TranslationResultWindow.h"
 #include <QApplication>
 #include <QClipboard>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QGuiApplication>
+#include <QMimeData>
 #include <QTextDocument>
 #include <QScreen>
 #include <QTimer>
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QCloseEvent>
+#include <QEvent>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 
@@ -23,6 +28,7 @@ void TranslationResultWindow::setupUI() {
     setWindowTitle(tr("翻译结果"));
     setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_ShowWithoutActivating);
+    setAcceptDrops(true);
     resize(360, 160);
 
     auto* mainLayout = new QVBoxLayout(this);
@@ -40,6 +46,7 @@ void TranslationResultWindow::setupUI() {
 
     translated_text_ = new QTextBrowser(this);
     translated_text_->setReadOnly(true);
+    translated_text_->setAcceptDrops(false);
     translated_text_->setFrameShape(QFrame::NoFrame);
     translated_text_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     translated_text_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -95,6 +102,10 @@ void TranslationResultWindow::setupUI() {
 
     auto_close_timer_ = new QTimer(this);
     auto_close_timer_->setSingleShot(true);
+    status_label_->installEventFilter(this);
+    original_text_->installEventFilter(this);
+    translated_text_->installEventFilter(this);
+    translated_text_->viewport()->installEventFilter(this);
     updatePinState();
 }
 
@@ -192,6 +203,80 @@ void TranslationResultWindow::keyPressEvent(QKeyEvent* event) {
         close();
     }
     QWidget::keyPressEvent(event);
+}
+
+bool TranslationResultWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == status_label_
+        || watched == original_text_
+        || watched == translated_text_
+        || watched == translated_text_->viewport()) {
+        switch (event->type()) {
+        case QEvent::MouseButtonPress:
+            mousePressEvent(static_cast<QMouseEvent*>(event));
+            return true;
+        case QEvent::MouseMove:
+            mouseMoveEvent(static_cast<QMouseEvent*>(event));
+            return true;
+        case QEvent::MouseButtonRelease:
+            mouseReleaseEvent(static_cast<QMouseEvent*>(event));
+            return true;
+        default:
+            break;
+        }
+    }
+
+    return QWidget::eventFilter(watched, event);
+}
+
+void TranslationResultWindow::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        dragging_ = true;
+        drag_offset_ = event->globalPosition().toPoint() - frameGeometry().topLeft();
+        event->accept();
+        return;
+    }
+
+    QWidget::mousePressEvent(event);
+}
+
+void TranslationResultWindow::mouseMoveEvent(QMouseEvent* event) {
+    if (dragging_ && (event->buttons() & Qt::LeftButton)) {
+        move(event->globalPosition().toPoint() - drag_offset_);
+        event->accept();
+        return;
+    }
+
+    QWidget::mouseMoveEvent(event);
+}
+
+void TranslationResultWindow::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        dragging_ = false;
+        event->accept();
+        return;
+    }
+
+    QWidget::mouseReleaseEvent(event);
+}
+
+void TranslationResultWindow::dragEnterEvent(QDragEnterEvent* event) {
+    if (event->mimeData()->hasText()) {
+        event->acceptProposedAction();
+        return;
+    }
+
+    QWidget::dragEnterEvent(event);
+}
+
+void TranslationResultWindow::dropEvent(QDropEvent* event) {
+    const QString text = event->mimeData()->text().trimmed();
+    if (text.isEmpty()) {
+        QWidget::dropEvent(event);
+        return;
+    }
+
+    emit translateRequested(text, event->position().toPoint() + frameGeometry().topLeft());
+    event->acceptProposedAction();
 }
 
 void TranslationResultWindow::closeEvent(QCloseEvent* event) {

@@ -3,11 +3,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="$ROOT_DIR/build-release"
+BUILD_DIR="$ROOT_DIR/build"
 STAGING_DIR="$ROOT_DIR/.deb-package"
 OUTPUT_DIR="$ROOT_DIR/dist"
 BINARY_NAME="desktop_translate"
 PACKAGE_NAME="desktop-translate"
+ICON_SOURCE="$ROOT_DIR/Icons8/icons8-translate-100.png"
 MAINTAINER="${DEB_MAINTAINER:-Desktop Translate Maintainer <maintainer@example.com>}"
 
 extract_version() {
@@ -40,7 +41,12 @@ cmake --build "$BUILD_DIR" -j"$(nproc)"
 
 echo "==> 准备打包目录"
 rm -rf "$STAGING_DIR"
-mkdir -p "$STAGING_DIR/DEBIAN" "$OUTPUT_DIR" "$STAGING_DIR/usr/share/applications"
+mkdir -p \
+    "$STAGING_DIR/DEBIAN" \
+    "$OUTPUT_DIR" \
+    "$STAGING_DIR/usr/share/applications" \
+    "$STAGING_DIR/usr/share/pixmaps" \
+    "$STAGING_DIR/usr/share/icons/hicolor/128x128/apps"
 
 echo "==> 安装文件到临时目录"
 DESTDIR="$STAGING_DIR" cmake --install "$BUILD_DIR" --prefix /usr
@@ -50,6 +56,14 @@ if [ ! -x "$STAGING_DIR/usr/bin/$BINARY_NAME" ]; then
     exit 1
 fi
 
+if [ ! -f "$ICON_SOURCE" ]; then
+    echo "错误: 未找到图标文件 $ICON_SOURCE"
+    exit 1
+fi
+
+install -m 0644 "$ICON_SOURCE" "$STAGING_DIR/usr/share/pixmaps/${PACKAGE_NAME}.png"
+install -m 0644 "$ICON_SOURCE" "$STAGING_DIR/usr/share/icons/hicolor/128x128/apps/${PACKAGE_NAME}.png"
+
 cat > "$STAGING_DIR/usr/share/applications/${PACKAGE_NAME}.desktop" <<EOF
 [Desktop Entry]
 Type=Application
@@ -58,6 +72,7 @@ Name[zh_CN]=桌面翻译
 Comment=Desktop translation tool
 Comment[zh_CN]=桌面划词翻译工具
 Exec=/usr/bin/${BINARY_NAME}
+Icon=/usr/share/pixmaps/${PACKAGE_NAME}.png
 Terminal=false
 Categories=Utility;
 EOF

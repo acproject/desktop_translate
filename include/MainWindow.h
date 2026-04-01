@@ -3,11 +3,14 @@
 
 #include <QMainWindow>
 #include <QPoint>
+#include <QRect>
 #include <QString>
 #include <QSystemTrayIcon>
 #include <QMenu>
 #include <QAction>
 #include <memory>
+
+class QTimer;
 
 namespace DesktopTranslate {
 
@@ -15,7 +18,7 @@ class SelectionOverlay;
 class TranslationResultWindow;
 class TestWindow;
 class Config;
-class HoverTranslateWindow;
+struct TranslationResult;
 
 /**
  * @brief 主窗口类 - 系统托盘应用
@@ -45,8 +48,10 @@ private slots:
     void onAboutAction();
     void onExitAction();
     void onTestApiConnection();
-    void onHoverTranslateRequested(const QString& text, const QPoint& globalPosition);
-    void toggleHoverWindow();
+    void onBubbleTranslateRequested(const QString& text, const QPoint& globalPosition);
+    void toggleHoverTranslation(bool enabled);
+    void onPrimarySelectionChanged();
+    void triggerPendingPrimaryTranslation();
 
 private:
     void setupUI();
@@ -78,10 +83,14 @@ private:
     
     // 测试窗口
     std::unique_ptr<TestWindow> test_window_;
-    std::unique_ptr<HoverTranslateWindow> hover_translate_window_;
     
     // 当前选区位置
     QPoint current_selection_pos_;
+    QTimer* primary_selection_timer_{nullptr};
+    QString pending_primary_text_;
+    QString last_primary_text_;
+    bool hover_translation_enabled_{true};
+    bool hover_translation_busy_{false};
 };
 
 } // namespace DesktopTranslate

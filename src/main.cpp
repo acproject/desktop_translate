@@ -2,15 +2,42 @@
 #include "Config.h"
 #include "TranslationService.h"
 #include <QApplication>
+#include <QDir>
 #include <QFile>
 #include <QFont>
+#include <QIcon>
 #include <iostream>
+
+namespace {
+
+QIcon loadApplicationIcon() {
+    const QStringList candidates = {
+        QStringLiteral(DESKTOP_TRANSLATE_SOURCE_ICON),
+        "/usr/share/pixmaps/desktop-translate.png"
+    };
+
+    for (const QString& path : candidates) {
+        if (QFile::exists(path)) {
+            QIcon icon(path);
+            if (!icon.isNull()) {
+                return icon;
+            }
+        }
+    }
+
+    return QIcon::fromTheme("desktop-translate");
+}
+
+}
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("DesktopTranslate");
-    app.setApplicationVersion("1.0.0");
+    app.setApplicationVersion("1.0.2");
+    app.setDesktopFileName("desktop-translate");
     app.setQuitOnLastWindowClosed(false);  // 关闭窗口不退出应用（托盘应用）
+    const QIcon appIcon = loadApplicationIcon();
+    app.setWindowIcon(appIcon);
     
     std::cout << "Application created..." << std::endl;
     
@@ -27,6 +54,7 @@ int main(int argc, char* argv[]) {
         std::cout << "Creating main window..." << std::endl;
         // 创建主窗口
         DesktopTranslate::MainWindow mainWindow;
+        mainWindow.setWindowIcon(appIcon);
         
         std::cout << "Desktop Translate started." << std::endl;
         std::cout << "Press Ctrl+F3 to start selection translation." << std::endl;

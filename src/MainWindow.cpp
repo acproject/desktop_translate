@@ -1,5 +1,4 @@
 #include "MainWindow.h"
-#include "HoverTranslateWindow.h"
 #include "SelectionOverlay.h"
 #include "TranslationResultWindow.h"
 #include "TranslationService.h"
@@ -9,8 +8,13 @@
 #include "GlobalShortcut.h"
 #include "OCRService.h"
 #include <QApplication>
+#include <QClipboard>
+#include <QCursor>
+#include <QFile>
+#include <QIcon>
 #include <QMessageBox>
 #include <QInputDialog>
+#include <QStringList>
 #include <QThread>
 #include <QTimer>
 #include <QDebug>
@@ -25,6 +29,28 @@
 #include <QLineEdit>
 
 namespace DesktopTranslate {
+
+namespace {
+
+QIcon loadTrayIcon() {
+    const QStringList candidates = {
+        QStringLiteral(DESKTOP_TRANSLATE_SOURCE_ICON),
+        "/usr/share/pixmaps/desktop-translate.png"
+    };
+
+    for (const QString& path : candidates) {
+        if (QFile::exists(path)) {
+            QIcon icon(path);
+            if (!icon.isNull()) {
+                return icon;
+            }
+        }
+    }
+
+    return QApplication::windowIcon();
+}
+
+}
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -46,13 +72,15 @@ void MainWindow::setupUI() {
     
     // 初始化翻译结果窗口
     result_window_ = std::make_unique<TranslationResultWindow>(this);
+    result_window_->setWindowIcon(QApplication::windowIcon());
     
     // 初始化测试窗口 - 使用nullptr作为父窗口使其成为独立窗口
     test_window_ = std::make_unique<TestWindow>(nullptr);
-
-    hover_translate_window_ = std::make_unique<HoverTranslateWindow>(nullptr);
-    hover_translate_window_->hide();
+    test_window_->setWindowIcon(QApplication::windowIcon());
     result_window_->hide();
+
+    primary_selection_timer_ = new QTimer(this);
+    primary_selection_timer_->setSingleShot(true);
 }
 
 void MainWindow::setupSystemTray() {
@@ -62,7 +90,10 @@ void MainWindow::setupSystemTray() {
     tray_icon_ = std::make_unique<QSystemTrayIcon>(this);
     
     // 设置图标（使用系统默认图标或自定义图标）
-    QIcon icon = QIcon::fromTheme("edit-copy", QApplication::style()->standardIcon(QStyle::SP_FileDialogContentsView));
+    QIcon icon = loadTrayIcon();
+    if (icon.isNull()) {
+        icon = QIcon::fromTheme("edit-copy", QApplication::style()->standardIcon(QStyle::SP_FileDialogContentsView));
+    }
     tray_icon_->setIcon(icon);
     tray_icon_->setToolTip(tr("桌面翻译"));
     
@@ -74,7 +105,9 @@ void MainWindow::setupSystemTray() {
     action_clipboard_translate_ = new QAction(tr("剪贴板翻译 (&C)"), this);
     action_clipboard_translate_->setShortcut(QKeySequence(QString::fromStdString(config.getShortcutClipboardTranslate())));
     action_test_window_ = new QAction(tr("显示测试窗口 (&T)"), this);
-    action_hover_window_ = new QAction(tr("悬浮拖放翻译 (&H)"), this);
+    action_hover_window_ = new QAction(tr("悬浮气泡翻译 (&H)"), this);
+    action_hover_window_->setCheckable(true);
+    action_hover_window_->setChecked(hover_translation_enabled_);
     action_settings_ = new QAction(tr("设置 (&O)"), this);
     action_about_ = new QAction(tr("关于 (&A)"), this);
     action_exit_ = new QAction(tr("退出 (&X)"), this);
@@ -134,7 +167,7 @@ void MainWindow::setupConnections() {
     connect(action_select_translate_, &QAction::triggered, this, &MainWindow::startSelectionTranslation);
     connect(action_clipboard_translate_, &QAction::triggered, this, &MainWindow::translateFromClipboard);
     connect(action_test_window_, &QAction::triggered, this, &MainWindow::showTestWindow);
-    connect(action_hover_window_, &QAction::triggered, this, &MainWindow::toggleHoverWindow);
+    connect(action_hover_window_, &QAction::toggled, this, &MainWindow::toggleHoverTranslation);
     connect(action_settings_, &QAction::triggered, this, &MainWindow::onSettingsAction);
     connect(action_about_, &QAction::triggered, this, &MainWindow::onAboutAction);
     connect(action_exit_, &QAction::triggered, this, &MainWindow::onExitAction);
@@ -159,8 +192,14 @@ void MainWindow::setupConnections() {
         performTranslation(text);
     });
 
-    connect(hover_translate_window_.get(), &HoverTranslateWindow::translateRequested,
-            this, &MainWindow::onHoverTranslateRequested);
+    connect(result_window_.get(), &TranslationResultWindow::translateRequested,
+            this, &MainWindow::onBubbleTranslateRequested);
+    connect(primary_selection_timer_, &QTimer::timeout,
+            this, &MainWindow::triggerPendingPrimaryTranslation);
+    if (auto* clipboard = QApplication::clipboard()) {
+        connect(clipboard, &QClipboard::selectionChanged,
+                this, &MainWindow::onPrimarySelectionChanged);
+    }
     
     // 更新测试窗口配置显示
     updateConfigDisplay();
@@ -243,9 +282,7 @@ void MainWindow::onSelectionCancelled() {
 void MainWindow::performTranslation(const QString& text) {
     test_window_->log(tr("开始翻译..."), "INFO");
     test_window_->setStatus(tr("翻译中"), "blue");
-    if (hover_translate_window_) {
-        hover_translate_window_->setBusy(true);
-    }
+    hover_translation_busy_ = true;
     
     // 显示翻译中提示
     tray_icon_->showMessage(tr("翻译中"), tr("正在请求翻译服务..."), QSystemTrayIcon::Information, 1000);
@@ -266,9 +303,7 @@ void MainWindow::performTranslation(const QString& text) {
 }
 
 void MainWindow::onTranslationComplete(const TranslationResult& result) {
-    if (hover_translate_window_) {
-        hover_translate_window_->setBusy(false);
-    }
+    hover_translation_busy_ = false;
 
     if (result.success) {
         test_window_->log(tr("翻译成功!"), "SUCCESS");
@@ -285,26 +320,78 @@ void MainWindow::onTranslationComplete(const TranslationResult& result) {
         result_window_->setResult(result.original_text, result.error_message, false);
         result_window_->showNear(current_selection_pos_);
     }
+
+    if (hover_translation_enabled_
+        && !pending_primary_text_.isEmpty()
+        && pending_primary_text_ != last_primary_text_) {
+        primary_selection_timer_->start(200);
+    }
 }
 
-void MainWindow::onHoverTranslateRequested(const QString& text, const QPoint& globalPosition) {
+void MainWindow::onBubbleTranslateRequested(const QString& text, const QPoint& globalPosition) {
     current_selection_pos_ = globalPosition;
-    test_window_->log(tr("收到悬浮拖放/PRIMARY 文本: %1").arg(text.left(50) + (text.length() > 50 ? "..." : "")), "INFO");
+    test_window_->log(tr("收到气泡拖放文本: %1").arg(text.left(50) + (text.length() > 50 ? "..." : "")), "INFO");
     performTranslation(text);
 }
 
-void MainWindow::toggleHoverWindow() {
-    if (!hover_translate_window_) {
+void MainWindow::toggleHoverTranslation(bool enabled) {
+    hover_translation_enabled_ = enabled;
+    if (!enabled) {
+        pending_primary_text_.clear();
+        last_primary_text_.clear();
+        primary_selection_timer_->stop();
+    } else {
+        onPrimarySelectionChanged();
+    }
+
+    tray_icon_->showMessage(
+        tr("悬浮气泡翻译"),
+        enabled ? tr("已开启，选中文本后将自动显示翻译气泡") : tr("已关闭"),
+        QSystemTrayIcon::Information,
+        1200
+    );
+}
+
+void MainWindow::onPrimarySelectionChanged() {
+    if (!hover_translation_enabled_) {
         return;
     }
 
-    if (hover_translate_window_->isVisible()) {
-        hover_translate_window_->hide();
+    auto* clipboard = QApplication::clipboard();
+    if (!clipboard || !clipboard->supportsSelection()) {
         return;
     }
 
-    hover_translate_window_->show();
-    hover_translate_window_->raise();
+    const QString text = clipboard->text(QClipboard::Selection).trimmed();
+    if (text.isEmpty()) {
+        pending_primary_text_.clear();
+        last_primary_text_.clear();
+        primary_selection_timer_->stop();
+        return;
+    }
+
+    pending_primary_text_ = text;
+    if (hover_translation_busy_) {
+        return;
+    }
+
+    primary_selection_timer_->start(350);
+}
+
+void MainWindow::triggerPendingPrimaryTranslation() {
+    if (!hover_translation_enabled_ || hover_translation_busy_) {
+        return;
+    }
+
+    const QString text = pending_primary_text_.trimmed();
+    if (text.isEmpty() || text == last_primary_text_) {
+        return;
+    }
+
+    last_primary_text_ = text;
+    current_selection_pos_ = QCursor::pos();
+    test_window_->log(tr("检测到 PRIMARY 选中文本: %1").arg(text.left(50) + (text.length() > 50 ? "..." : "")), "INFO");
+    performTranslation(text);
 }
 
 void MainWindow::onSettingsAction() {
@@ -452,7 +539,7 @@ void MainWindow::onSettingsAction() {
 void MainWindow::onAboutAction() {
     QMessageBox::about(this, tr("关于"),
         tr("<h3>桌面翻译工具</h3>"
-           "<p>版本: 1.0.0</p>"
+           "<p>版本: 1.0.2</p>"
            "<p>一个简单的桌面翻译工具，支持框选翻译。</p>"
            "<p>使用本地大模型API（OpenAI兼容）进行翻译。</p>"
            "<hr>"
