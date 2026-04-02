@@ -39,6 +39,38 @@ QString trimLogLine(QString line) {
     return line.trimmed();
 }
 
+bool llamaServerHasOffloadDevice(const QString& executablePath) {
+    QProcess probe;
+    probe.setProgram(executablePath);
+    probe.setArguments({"--list-devices"});
+    probe.setProcessChannelMode(QProcess::MergedChannels);
+    probe.start();
+
+    if (!probe.waitForStarted(3000)) {
+        qWarning().noquote() << QStringLiteral("Failed to probe llama.cpp devices: %1").arg(probe.errorString());
+        return false;
+    }
+
+    if (!probe.waitForFinished(5000)) {
+        probe.kill();
+        probe.waitForFinished(1000);
+        qWarning() << "Timed out while probing llama.cpp devices";
+        return false;
+    }
+
+    const QString output = QString::fromLocal8Bit(probe.readAllStandardOutput());
+    const QStringList lines = output.split('\n', Qt::SkipEmptyParts);
+    for (QString line : lines) {
+        line = trimLogLine(line);
+        if (line.isEmpty() || line == "Available devices:") {
+            continue;
+        }
+        return true;
+    }
+
+    return false;
+}
+
 }
 
 ModelServiceManager::ModelServiceManager(QObject* parent)
@@ -91,6 +123,7 @@ void ModelServiceManager::startService(const ServiceSpec& spec) {
         return;
     }
 
+    const bool useGpuOffload = llamaServerHasOffloadDevice(executablePath);
     QStringList arguments = {
         "--host", "127.0.0.1",
         "--port", QString::number(spec.port),
@@ -98,6 +131,10 @@ void ModelServiceManager::startService(const ServiceSpec& spec) {
         "--alias", spec.alias,
         "--ctx-size", QString::number(spec.contextSize)
     };
+
+    if (useGpuOffload) {
+        arguments << "--n-gpu-layers" << "all" << "--flash-attn" << "on";
+    }
 
     if (!spec.mmprojPath.isEmpty()) {
         arguments << "--mmproj" << spec.mmprojPath;
@@ -116,6 +153,8 @@ void ModelServiceManager::startService(const ServiceSpec& spec) {
                              .arg(spec.name)
                              .arg(spec.port)
                              .arg(QDir::toNativeSeparators(spec.modelPath));
+    qInfo().noquote() << QStringLiteral("%1 model service backend: %2")
+                             .arg(spec.name, useGpuOffload ? QStringLiteral("GPU") : QStringLiteral("CPU"));
 }
 
 QProcess* ModelServiceManager::ensureProcess(ServiceKind kind, const QString& name) {
