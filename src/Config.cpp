@@ -16,11 +16,20 @@ Config::Config() {
 }
 
 std::filesystem::path Config::getConfigPath() const {
+    if (const char* appData = std::getenv("APPDATA")) {
+        return std::filesystem::path(appData) / "desktop_translate" / "config.json";
+    }
+
+    if (const char* xdgConfigHome = std::getenv("XDG_CONFIG_HOME")) {
+        return std::filesystem::path(xdgConfigHome) / "desktop_translate" / "config.json";
+    }
+
     const char* home = std::getenv("HOME");
     if (home) {
         return std::filesystem::path(home) / ".config" / "desktop_translate" / "config.json";
     }
-    return std::filesystem::path("/tmp") / "desktop_translate_config.json";
+
+    return std::filesystem::temp_directory_path() / "desktop_translate_config.json";
 }
 
 std::string Config::getApiEndpoint() const {
@@ -213,7 +222,7 @@ bool Config::load() {
 
         api_key_ = getJsonValue("api_key");
         model_ = getJsonValue("model");
-        if (model_.empty()) model_ = "Qwen3.5-122B-A10B-GGUF";
+        if (model_.empty()) model_ = "HY-MT1.5-1.8B-Q8_0";
 
         source_language_ = getJsonValue("source_language");
         if (source_language_.empty()) source_language_ = "auto";
@@ -253,7 +262,7 @@ bool Config::load() {
         ocr_api_key_ = getJsonValue("ocr_api_key");
 
         ocr_model_ = getJsonValue("ocr_model");
-        if (ocr_model_.empty()) ocr_model_ = "gpt-4o";
+        if (ocr_model_.empty()) ocr_model_ = "PaddleOCR-VL-1.5-GGUF";
         
         std::cout << "Config loaded successfully:" << std::endl;
         std::cout << "  API Port: " << api_port_ << std::endl;

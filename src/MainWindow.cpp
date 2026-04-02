@@ -35,6 +35,8 @@ namespace {
 QIcon loadTrayIcon() {
     const QStringList candidates = {
         QStringLiteral(DESKTOP_TRANSLATE_SOURCE_ICON),
+        QApplication::applicationDirPath() + "/icons8-translate-100.png",
+        QApplication::applicationDirPath() + "/desktop-translate.png",
         "/usr/share/pixmaps/desktop-translate.png"
     };
 
@@ -48,6 +50,26 @@ QIcon loadTrayIcon() {
     }
 
     return QApplication::windowIcon();
+}
+
+QString currentHoverSourceText(QClipboard* clipboard) {
+    if (!clipboard) {
+        return {};
+    }
+
+    if (clipboard->supportsSelection()) {
+        return clipboard->text(QClipboard::Selection).trimmed();
+    }
+
+    return clipboard->text(QClipboard::Clipboard).trimmed();
+}
+
+QString hoverSourceDescription(QClipboard* clipboard, const QObject* context) {
+    if (clipboard && clipboard->supportsSelection()) {
+        return context->tr("选中文本");
+    }
+
+    return context->tr("剪贴板文本");
 }
 
 }
@@ -130,12 +152,11 @@ void MainWindow::setupSystemTray() {
 void MainWindow::setupShortcuts() {
     auto& config = Config::instance();
     
-    qDebug() << "Setting up global shortcuts using X11...";
+    qDebug() << "Setting up global shortcuts...";
     qDebug() << "Select shortcut:" << QString::fromStdString(config.getShortcutSelectTranslate());
     qDebug() << "Clipboard shortcut:" << QString::fromStdString(config.getShortcutClipboardTranslate());
     qDebug() << "Hover toggle shortcut:" << QString::fromStdString(config.getShortcutHoverTranslationToggle());
     
-    // 使用 X11 全局快捷键
     auto& globalShortcut = GlobalShortcut::instance();
     
     // 注册框选翻译快捷键
@@ -206,8 +227,13 @@ void MainWindow::setupConnections() {
     connect(primary_selection_timer_, &QTimer::timeout,
             this, &MainWindow::triggerPendingPrimaryTranslation);
     if (auto* clipboard = QApplication::clipboard()) {
-        connect(clipboard, &QClipboard::selectionChanged,
-                this, &MainWindow::onPrimarySelectionChanged);
+        if (clipboard->supportsSelection()) {
+            connect(clipboard, &QClipboard::selectionChanged,
+                    this, &MainWindow::onPrimarySelectionChanged);
+        } else {
+            connect(clipboard, &QClipboard::dataChanged,
+                    this, &MainWindow::onPrimarySelectionChanged);
+        }
     }
     
     // 更新测试窗口配置显示
@@ -367,11 +393,11 @@ void MainWindow::onPrimarySelectionChanged() {
     }
 
     auto* clipboard = QApplication::clipboard();
-    if (!clipboard || !clipboard->supportsSelection()) {
+    if (!clipboard) {
         return;
     }
 
-    const QString text = clipboard->text(QClipboard::Selection).trimmed();
+    const QString text = currentHoverSourceText(clipboard);
     if (text.isEmpty()) {
         pending_primary_text_.clear();
         last_primary_text_.clear();
@@ -399,7 +425,12 @@ void MainWindow::triggerPendingPrimaryTranslation() {
 
     last_primary_text_ = text;
     current_selection_pos_ = QCursor::pos();
-    test_window_->log(tr("检测到 PRIMARY 选中文本: %1").arg(text.left(50) + (text.length() > 50 ? "..." : "")), "INFO");
+    test_window_->log(
+        tr("检测到%1: %2")
+            .arg(hoverSourceDescription(QApplication::clipboard(), this))
+            .arg(text.left(50) + (text.length() > 50 ? "..." : "")),
+        "INFO"
+    );
     performTranslation(text);
 }
 

@@ -46,9 +46,9 @@ private:
     OCRService& operator=(const OCRService&) = delete;
     
     std::string api_host_{"http://127.0.0.1"};
-    int api_port_{8113};
+    int api_port_{8111};
     std::string api_key_;
-    std::string model_{"gpt-4o"};
+    std::string model_{"PaddleOCR-VL-1.5-GGUF"};
     
     QString imageToBase64(const QImage& image);
 };

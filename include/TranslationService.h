@@ -61,7 +61,7 @@ private:
     std::string api_host_{"http://127.0.0.1"};
     int api_port_{8110};
     std::string api_key_{""};
-    std::string model_{"Qwen3.5-122B-A10B-GGUF"};
+    std::string model_{"HY-MT1.5-1.8B-Q8_0"};
     int timeout_{180};  // 默认3分钟
     std::string source_language_{"auto"};
     std::string target_language_{"zh"};

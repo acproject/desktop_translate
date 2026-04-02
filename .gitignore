@@ -3,3 +3,6 @@ build-debug
 .deb-package
 build-release
 dist
+build-*
+models
+third_party/llama.cpp/build

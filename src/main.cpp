@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "Config.h"
+#include "ModelServiceManager.h"
 #include "TranslationService.h"
 #include <QApplication>
 #include <QDir>
@@ -13,6 +14,8 @@ namespace {
 QIcon loadApplicationIcon() {
     const QStringList candidates = {
         QStringLiteral(DESKTOP_TRANSLATE_SOURCE_ICON),
+        QDir(QApplication::applicationDirPath()).filePath("icons8-translate-100.png"),
+        QDir(QApplication::applicationDirPath()).filePath("desktop-translate.png"),
         "/usr/share/pixmaps/desktop-translate.png"
     };
 
@@ -34,7 +37,9 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("DesktopTranslate");
     app.setApplicationVersion("1.0.4");
+#if defined(Q_OS_LINUX)
     app.setDesktopFileName("desktop-translate");
+#endif
     app.setQuitOnLastWindowClosed(false);  // 关闭窗口不退出应用（托盘应用）
     const QIcon appIcon = loadApplicationIcon();
     app.setWindowIcon(appIcon);
@@ -43,16 +48,21 @@ int main(int argc, char* argv[]) {
     
     // 设置默认字体
     QFont font = app.font();
+#if defined(Q_OS_WIN)
+    font.setFamily("Microsoft YaHei");
+#else
     font.setFamily("WenQuanYi Micro Hei");
+#endif
     app.setFont(font);
     
     try {
         std::cout << "Loading config..." << std::endl;
-        // 加载配置
         DesktopTranslate::Config::instance().load();
+
+        DesktopTranslate::ModelServiceManager modelServiceManager(&app);
+        modelServiceManager.startAsync();
         
         std::cout << "Creating main window..." << std::endl;
-        // 创建主窗口
         DesktopTranslate::MainWindow mainWindow;
         mainWindow.setWindowIcon(appIcon);
         

@@ -16,13 +16,49 @@
 
 namespace DesktopTranslate {
 
+namespace {
+
+QString hoverText(QClipboard* clipboard) {
+    if (!clipboard) {
+        return {};
+    }
+
+    if (clipboard->supportsSelection()) {
+        return clipboard->text(QClipboard::Selection).trimmed();
+    }
+
+    return clipboard->text(QClipboard::Clipboard).trimmed();
+}
+
+QString emptyPreviewText(QClipboard* clipboard, const QObject* context) {
+    if (clipboard && clipboard->supportsSelection()) {
+        return context->tr("当前 PRIMARY 选区为空");
+    }
+
+    return context->tr("当前剪贴板为空");
+}
+
+QString hoverHintText(QClipboard* clipboard, const QObject* context) {
+    if (clipboard && clipboard->supportsSelection()) {
+        return context->tr("拖放文本到这里，或翻译当前选中的 PRIMARY 文本");
+    }
+
+    return context->tr("拖放文本到这里，或翻译当前剪贴板中的文本");
+}
+
+}
+
 HoverTranslateWindow::HoverTranslateWindow(QWidget* parent)
     : QWidget(parent)
 {
     setupUI();
 
     auto* clipboard = QApplication::clipboard();
-    connect(clipboard, &QClipboard::selectionChanged, this, &HoverTranslateWindow::onPrimarySelectionChanged);
+    if (clipboard->supportsSelection()) {
+        connect(clipboard, &QClipboard::selectionChanged, this, &HoverTranslateWindow::onPrimarySelectionChanged);
+    } else {
+        connect(clipboard, &QClipboard::dataChanged, this, &HoverTranslateWindow::onPrimarySelectionChanged);
+    }
     connect(translate_primary_button_, &QPushButton::clicked, this, &HoverTranslateWindow::emitPrimarySelectionTranslation);
     connect(hide_button_, &QPushButton::clicked, this, &QWidget::hide);
 
@@ -42,7 +78,7 @@ void HoverTranslateWindow::setBusy(bool busy) {
         return;
     }
 
-    hint_label_->setText(tr("拖放文本到这里，或翻译当前选中的 PRIMARY 文本"));
+    hint_label_->setText(hoverHintText(QApplication::clipboard(), this));
     updatePrimaryPreview();
     if (!pending_primary_text_.isEmpty()) {
         auto_translate_timer_->start(120);
@@ -106,7 +142,7 @@ void HoverTranslateWindow::setupUI() {
     title_label_->setStyleSheet("font-weight: bold; font-size: 15px; color: white;");
     layout->addWidget(title_label_);
 
-    hint_label_ = new QLabel(tr("拖放文本到这里，或翻译当前选中的 PRIMARY 文本"), this);
+    hint_label_ = new QLabel(hoverHintText(QApplication::clipboard(), this), this);
     hint_label_->setWordWrap(true);
     hint_label_->setStyleSheet("color: rgba(255, 255, 255, 0.9);");
     layout->addWidget(hint_label_);
@@ -161,10 +197,7 @@ void HoverTranslateWindow::setupUI() {
 
 void HoverTranslateWindow::onPrimarySelectionChanged() {
     auto* clipboard = QApplication::clipboard();
-    QString text;
-    if (clipboard->supportsSelection()) {
-        text = clipboard->text(QClipboard::Selection).trimmed();
-    }
+    const QString text = hoverText(clipboard);
 
     if (text.isEmpty()) {
         pending_primary_text_.clear();
@@ -187,19 +220,20 @@ void HoverTranslateWindow::onPrimarySelectionChanged() {
         return;
     }
 
-    hint_label_->setText(tr("检测到 PRIMARY 选区，准备自动翻译"));
+    hint_label_->setText(
+        clipboard->supportsSelection()
+            ? tr("检测到 PRIMARY 选区，准备自动翻译")
+            : tr("检测到新的剪贴板文本，准备自动翻译")
+    );
     auto_translate_timer_->start(350);
 }
 
 void HoverTranslateWindow::updatePrimaryPreview() {
     auto* clipboard = QApplication::clipboard();
-    QString text;
-    if (clipboard->supportsSelection()) {
-        text = clipboard->text(QClipboard::Selection).trimmed();
-    }
+    QString text = hoverText(clipboard);
 
     if (text.isEmpty()) {
-        selection_preview_label_->setText(tr("当前 PRIMARY 选区为空"));
+        selection_preview_label_->setText(emptyPreviewText(clipboard, this));
         return;
     }
 
@@ -211,19 +245,14 @@ void HoverTranslateWindow::updatePrimaryPreview() {
 
 void HoverTranslateWindow::emitPrimarySelectionTranslation() {
     auto* clipboard = QApplication::clipboard();
-    if (!clipboard->supportsSelection()) {
-        hint_label_->setText(tr("当前平台不支持 PRIMARY 选区"));
-        return;
-    }
-
-    const QString text = clipboard->text(QClipboard::Selection).trimmed();
+    const QString text = hoverText(clipboard);
     if (text.isEmpty()) {
         hint_label_->setText(tr("当前没有选中文本"));
-        selection_preview_label_->setText(tr("当前 PRIMARY 选区为空"));
+        selection_preview_label_->setText(emptyPreviewText(clipboard, this));
         return;
     }
 
-    hint_label_->setText(tr("已读取 PRIMARY 选区"));
+    hint_label_->setText(clipboard->supportsSelection() ? tr("已读取 PRIMARY 选区") : tr("已读取剪贴板文本"));
     pending_primary_text_.clear();
     last_auto_translated_text_ = text;
     emit translateRequested(text, frameGeometry().center());
@@ -244,7 +273,11 @@ void HoverTranslateWindow::triggerPendingPrimaryTranslation() {
     }
 
     last_auto_translated_text_ = text;
-    hint_label_->setText(tr("检测到 PRIMARY 选区，开始自动翻译"));
+    hint_label_->setText(
+        QApplication::clipboard()->supportsSelection()
+            ? tr("检测到 PRIMARY 选区，开始自动翻译")
+            : tr("检测到新的剪贴板文本，开始自动翻译")
+    );
     emit translateRequested(text, QCursor::pos());
 }
 
