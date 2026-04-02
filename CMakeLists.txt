@@ -11,6 +11,13 @@ if(WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
     set(VCPKG_TARGET_TRIPLET "x64-windows" CACHE STRING "")
 endif()
 
+if(WIN32)
+    set(_default_qt6_config "D:/vcpkg/installed/${VCPKG_TARGET_TRIPLET}/share/Qt6")
+    if(EXISTS "${_default_qt6_config}")
+        list(APPEND CMAKE_PREFIX_PATH "${_default_qt6_config}")
+    endif()
+endif()
+
 project(desktop_translate VERSION 1.0.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -106,6 +113,18 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(${PROJECT_NAME} PRIVATE ${X11_LIBRARIES})
 elseif(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE user32)
+endif()
+
+if(WIN32 AND Qt6_DIR)
+    get_filename_component(_qt6_triplet_root "${Qt6_DIR}/../.." ABSOLUTE)
+    set(_qt_windeployqt "${_qt6_triplet_root}/tools/Qt6/bin/windeployqt.exe")
+
+    if(EXISTS "${_qt_windeployqt}")
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND "${_qt_windeployqt}" --no-translations "$<TARGET_FILE:${PROJECT_NAME}>"
+            VERBATIM
+        )
+    endif()
 endif()
 
 # 编译选项
