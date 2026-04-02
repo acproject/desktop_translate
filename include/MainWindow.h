@@ -8,6 +8,7 @@
 #include <QSystemTrayIcon>
 #include <QMenu>
 #include <QAction>
+#include <QtGlobal>
 #include <memory>
 
 class QTimer;
@@ -52,6 +53,7 @@ private slots:
     void toggleHoverTranslation(bool enabled);
     void onPrimarySelectionChanged();
     void triggerPendingPrimaryTranslation();
+    void pollWindowsHoverSelection();
 
 private:
     void setupUI();
@@ -91,6 +93,10 @@ private:
     QString last_primary_text_;
     bool hover_translation_enabled_{true};
     bool hover_translation_busy_{false};
+    QTimer* windows_hover_poll_timer_{nullptr};
+    bool left_mouse_button_down_{false};
+    bool suppress_hover_clipboard_events_{false};
+    qint64 left_mouse_button_pressed_at_ms_{0};
 };
 
 } // namespace DesktopTranslate

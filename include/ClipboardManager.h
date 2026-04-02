@@ -16,14 +16,10 @@ class ClipboardManager : public QObject {
 public:
     static ClipboardManager& instance();
 
-    // 复制文本到剪贴板
     void copyToClipboard(const QString& text);
-    
-    // 从剪贴板获取文本
     QString getFromClipboard();
-    
-    // 从选区获取文本（通过OCR或剪贴板模拟）
     QString getTextFromSelection(int x, int y, int width, int height);
+    QString captureSelectedTextFromActiveWindow();
 
 signals:
     void textCopied(const QString& text);

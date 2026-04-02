@@ -26,7 +26,12 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDialog>
+#include <QDateTime>
 #include <QLineEdit>
+
+#if defined(Q_OS_WIN)
+#include <windows.h>
+#endif
 
 namespace DesktopTranslate {
 
@@ -103,6 +108,8 @@ void MainWindow::setupUI() {
 
     primary_selection_timer_ = new QTimer(this);
     primary_selection_timer_->setSingleShot(true);
+    windows_hover_poll_timer_ = new QTimer(this);
+    windows_hover_poll_timer_->setInterval(120);
 }
 
 void MainWindow::setupSystemTray() {
@@ -235,6 +242,14 @@ void MainWindow::setupConnections() {
                     this, &MainWindow::onPrimarySelectionChanged);
         }
     }
+
+#if defined(Q_OS_WIN)
+    connect(windows_hover_poll_timer_, &QTimer::timeout,
+            this, &MainWindow::pollWindowsHoverSelection);
+    if (hover_translation_enabled_) {
+        windows_hover_poll_timer_->start();
+    }
+#endif
     
     // 更新测试窗口配置显示
     updateConfigDisplay();
@@ -375,7 +390,15 @@ void MainWindow::toggleHoverTranslation(bool enabled) {
         pending_primary_text_.clear();
         last_primary_text_.clear();
         primary_selection_timer_->stop();
+        left_mouse_button_down_ = false;
+        left_mouse_button_pressed_at_ms_ = 0;
+#if defined(Q_OS_WIN)
+        windows_hover_poll_timer_->stop();
+#endif
     } else {
+#if defined(Q_OS_WIN)
+        windows_hover_poll_timer_->start();
+#endif
         onPrimarySelectionChanged();
     }
 
@@ -389,6 +412,10 @@ void MainWindow::toggleHoverTranslation(bool enabled) {
 
 void MainWindow::onPrimarySelectionChanged() {
     if (!hover_translation_enabled_) {
+        return;
+    }
+
+    if (suppress_hover_clipboard_events_) {
         return;
     }
 
@@ -432,6 +459,49 @@ void MainWindow::triggerPendingPrimaryTranslation() {
         "INFO"
     );
     performTranslation(text);
+}
+
+void MainWindow::pollWindowsHoverSelection() {
+#if defined(Q_OS_WIN)
+    const bool leftButtonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    if (leftButtonDown && !left_mouse_button_down_) {
+        left_mouse_button_down_ = true;
+        left_mouse_button_pressed_at_ms_ = now;
+        return;
+    }
+
+    if (leftButtonDown) {
+        return;
+    }
+
+    if (!left_mouse_button_down_) {
+        return;
+    }
+
+    left_mouse_button_down_ = false;
+    if (!hover_translation_enabled_ || hover_translation_busy_) {
+        return;
+    }
+
+    if (left_mouse_button_pressed_at_ms_ == 0 || now - left_mouse_button_pressed_at_ms_ < 180) {
+        return;
+    }
+
+    left_mouse_button_pressed_at_ms_ = 0;
+    suppress_hover_clipboard_events_ = true;
+    const QString text = ClipboardManager::instance().captureSelectedTextFromActiveWindow();
+    suppress_hover_clipboard_events_ = false;
+
+    const QString trimmedText = text.trimmed();
+    if (trimmedText.isEmpty() || trimmedText == last_primary_text_) {
+        return;
+    }
+
+    pending_primary_text_ = trimmedText;
+    primary_selection_timer_->start(120);
+#endif
 }
 
 void MainWindow::onSettingsAction() {

@@ -1,13 +1,77 @@
 #include "ClipboardManager.h"
 #include <QApplication>
 #include <QClipboard>
+#include <QEventLoop>
+#include <QMimeData>
 #include <QProcess>
 #include <QScreen>
 #include <QPixmap>
 #include <QDebug>
+#include <QTimer>
 #include <QThread>
 
+#if defined(Q_OS_WIN)
+#include <windows.h>
+#endif
+
 namespace DesktopTranslate {
+
+namespace {
+
+std::unique_ptr<QMimeData> cloneMimeData(const QMimeData* source) {
+    auto mimeData = std::make_unique<QMimeData>();
+    if (!source) {
+        return mimeData;
+    }
+
+    for (const QString& format : source->formats()) {
+        mimeData->setData(format, source->data(format));
+    }
+
+    return mimeData;
+}
+
+#if defined(Q_OS_WIN)
+bool sendCopyToForegroundWindow() {
+    HWND foregroundWindow = GetForegroundWindow();
+    if (!foregroundWindow) {
+        return false;
+    }
+
+    DWORD processId = 0;
+    const DWORD threadId = GetWindowThreadProcessId(foregroundWindow, &processId);
+    if (processId == GetCurrentProcessId()) {
+        return false;
+    }
+
+    GUITHREADINFO guiThreadInfo{};
+    guiThreadInfo.cbSize = sizeof(guiThreadInfo);
+    HWND targetWindow = foregroundWindow;
+    if (threadId != 0 && GetGUIThreadInfo(threadId, &guiThreadInfo) && guiThreadInfo.hwndFocus) {
+        targetWindow = guiThreadInfo.hwndFocus;
+    }
+
+    DWORD_PTR messageResult = 0;
+    if (SendMessageTimeoutW(targetWindow, WM_COPY, 0, 0, SMTO_ABORTIFHUNG, 150, &messageResult) != 0) {
+        return true;
+    }
+
+    INPUT inputs[4]{};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = VK_CONTROL;
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = 'C';
+    inputs[2].type = INPUT_KEYBOARD;
+    inputs[2].ki.wVk = 'C';
+    inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[3].type = INPUT_KEYBOARD;
+    inputs[3].ki.wVk = VK_CONTROL;
+    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+    return SendInput(4, inputs, sizeof(INPUT)) == 4;
+}
+#endif
+
+}
 
 ClipboardManager& ClipboardManager::instance() {
     static ClipboardManager manager;
@@ -25,6 +89,46 @@ void ClipboardManager::copyToClipboard(const QString& text) {
 QString ClipboardManager::getFromClipboard() {
     QClipboard* clipboard = QApplication::clipboard();
     return clipboard->text();
+}
+
+QString ClipboardManager::captureSelectedTextFromActiveWindow() {
+#if defined(Q_OS_WIN)
+    QClipboard* clipboard = QApplication::clipboard();
+    if (!clipboard) {
+        return {};
+    }
+
+    const QString previousText = clipboard->text(QClipboard::Clipboard);
+    auto previousMimeData = cloneMimeData(clipboard->mimeData(QClipboard::Clipboard));
+
+    QEventLoop loop;
+    QTimer timeoutTimer;
+    timeoutTimer.setSingleShot(true);
+
+    QObject::connect(clipboard, &QClipboard::dataChanged, &loop, &QEventLoop::quit);
+    QObject::connect(&timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit);
+
+    if (!sendCopyToForegroundWindow()) {
+        return {};
+    }
+
+    timeoutTimer.start(250);
+    loop.exec();
+
+    const QString capturedText = clipboard->text(QClipboard::Clipboard).trimmed();
+
+    if (previousMimeData && !previousMimeData->formats().isEmpty()) {
+        clipboard->setMimeData(previousMimeData.release(), QClipboard::Clipboard);
+    } else if (previousText.isEmpty()) {
+        clipboard->clear(QClipboard::Clipboard);
+    } else {
+        clipboard->setText(previousText, QClipboard::Clipboard);
+    }
+
+    return capturedText;
+#else
+    return {};
+#endif
 }
 
 QString ClipboardManager::getTextFromSelection(int x, int y, int width, int height) {
