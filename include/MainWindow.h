@@ -97,6 +97,7 @@ private:
     bool left_mouse_button_down_{false};
     bool suppress_hover_clipboard_events_{false};
     qint64 left_mouse_button_pressed_at_ms_{0};
+    QPoint left_mouse_button_pressed_pos_;
 };
 
 } // namespace DesktopTranslate

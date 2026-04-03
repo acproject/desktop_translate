@@ -7,6 +7,8 @@
 
 namespace DesktopTranslate {
 
+class WindowsHotkeyEventFilter;
+
 /**
  * @brief 全局快捷键类 - 使用 X11 实现真正的全局快捷键
  */
@@ -29,8 +31,10 @@ signals:
     void shortcutActivated(const QString& id);
 
 private:
+    friend class WindowsHotkeyEventFilter;
     GlobalShortcut();
     ~GlobalShortcut();
+    void activateShortcutByNativeId(int native_id);
     GlobalShortcut(const GlobalShortcut&) = delete;
     GlobalShortcut& operator=(const GlobalShortcut&) = delete;
 

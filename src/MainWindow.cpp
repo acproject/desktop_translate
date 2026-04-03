@@ -392,6 +392,7 @@ void MainWindow::toggleHoverTranslation(bool enabled) {
         primary_selection_timer_->stop();
         left_mouse_button_down_ = false;
         left_mouse_button_pressed_at_ms_ = 0;
+        left_mouse_button_pressed_pos_ = QPoint();
 #if defined(Q_OS_WIN)
         windows_hover_poll_timer_->stop();
 #endif
@@ -469,6 +470,7 @@ void MainWindow::pollWindowsHoverSelection() {
     if (leftButtonDown && !left_mouse_button_down_) {
         left_mouse_button_down_ = true;
         left_mouse_button_pressed_at_ms_ = now;
+        left_mouse_button_pressed_pos_ = QCursor::pos();
         return;
     }
 
@@ -486,6 +488,12 @@ void MainWindow::pollWindowsHoverSelection() {
     }
 
     if (left_mouse_button_pressed_at_ms_ == 0 || now - left_mouse_button_pressed_at_ms_ < 180) {
+        return;
+    }
+
+    const QPoint releasePos = QCursor::pos();
+    if ((releasePos - left_mouse_button_pressed_pos_).manhattanLength() < 8) {
+        left_mouse_button_pressed_at_ms_ = 0;
         return;
     }
 

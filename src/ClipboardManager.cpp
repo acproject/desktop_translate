@@ -32,7 +32,7 @@ std::unique_ptr<QMimeData> cloneMimeData(const QMimeData* source) {
 }
 
 #if defined(Q_OS_WIN)
-bool sendCopyToForegroundWindow() {
+bool sendCopyShortcutToForegroundWindow() {
     HWND foregroundWindow = GetForegroundWindow();
     if (!foregroundWindow) {
         return false;
@@ -49,11 +49,6 @@ bool sendCopyToForegroundWindow() {
     HWND targetWindow = foregroundWindow;
     if (threadId != 0 && GetGUIThreadInfo(threadId, &guiThreadInfo) && guiThreadInfo.hwndFocus) {
         targetWindow = guiThreadInfo.hwndFocus;
-    }
-
-    DWORD_PTR messageResult = 0;
-    if (SendMessageTimeoutW(targetWindow, WM_COPY, 0, 0, SMTO_ABORTIFHUNG, 150, &messageResult) != 0) {
-        return true;
     }
 
     INPUT inputs[4]{};
@@ -108,7 +103,7 @@ QString ClipboardManager::captureSelectedTextFromActiveWindow() {
     QObject::connect(clipboard, &QClipboard::dataChanged, &loop, &QEventLoop::quit);
     QObject::connect(&timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit);
 
-    if (!sendCopyToForegroundWindow()) {
+    if (!sendCopyShortcutToForegroundWindow()) {
         return {};
     }
 

@@ -1,4 +1,6 @@
 #include "GlobalShortcut.h"
+#include <QAbstractNativeEventFilter>
+#include <QCoreApplication>
 #include <QDebug>
 #include <QHash>
 #include <QStringList>
@@ -21,32 +23,38 @@ struct ShortcutRegistration {
     UINT virtual_key{0};
 };
 
-struct GlobalShortcut::Impl {
-    HWND message_window{nullptr};
-    QHash<QString, ShortcutRegistration> registered_keys;
-    QTimer* event_timer{nullptr};
-    int next_hotkey_id{1};
-};
+class WindowsHotkeyEventFilter : public QAbstractNativeEventFilter {
+public:
+    explicit WindowsHotkeyEventFilter(GlobalShortcut* owner)
+        : owner_(owner) {
+    }
 
-static bool ensureWindowClassRegistered() {
-    static bool registered = false;
-    if (registered) {
+    bool nativeEventFilter(const QByteArray& eventType, void* message, qintptr* result) override {
+        if (eventType != "windows_generic_MSG" && eventType != "windows_dispatcher_MSG") {
+            return false;
+        }
+
+        auto* nativeMessage = static_cast<MSG*>(message);
+        if (!nativeMessage || nativeMessage->message != WM_HOTKEY) {
+            return false;
+        }
+
+        owner_->activateShortcutByNativeId(static_cast<int>(nativeMessage->wParam));
+        if (result) {
+            *result = 0;
+        }
         return true;
     }
 
-    WNDCLASSW window_class{};
-    window_class.lpfnWndProc = DefWindowProcW;
-    window_class.hInstance = GetModuleHandleW(nullptr);
-    window_class.lpszClassName = L"DesktopTranslateHotkeyWindow";
+private:
+    GlobalShortcut* owner_{nullptr};
+};
 
-    const ATOM atom = RegisterClassW(&window_class);
-    if (atom == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-        return false;
-    }
-
-    registered = true;
-    return true;
-}
+struct GlobalShortcut::Impl {
+    QHash<QString, ShortcutRegistration> registered_keys;
+    int next_hotkey_id{1};
+    std::unique_ptr<WindowsHotkeyEventFilter> event_filter;
+};
 
 static bool parseShortcut(const QString& shortcut, UINT* virtual_key, UINT* modifiers) {
     *virtual_key = 0;
@@ -176,47 +184,8 @@ GlobalShortcut::GlobalShortcut()
     : impl_(std::make_unique<Impl>())
 {
 #if defined(Q_OS_WIN)
-    if (!ensureWindowClassRegistered()) {
-        qWarning() << "Failed to register hotkey window class";
-        return;
-    }
-
-    impl_->message_window = CreateWindowExW(
-        0,
-        L"DesktopTranslateHotkeyWindow",
-        L"DesktopTranslateHotkeyWindow",
-        0,
-        0,
-        0,
-        0,
-        0,
-        HWND_MESSAGE,
-        nullptr,
-        GetModuleHandleW(nullptr),
-        nullptr
-    );
-    if (!impl_->message_window) {
-        qWarning() << "Failed to create hotkey message window";
-        return;
-    }
-
-    impl_->event_timer = new QTimer(this);
-    connect(impl_->event_timer, &QTimer::timeout, this, [this]() {
-        if (!impl_->message_window) {
-            return;
-        }
-
-        MSG message{};
-        while (PeekMessageW(&message, impl_->message_window, WM_HOTKEY, WM_HOTKEY, PM_REMOVE)) {
-            const int native_id = static_cast<int>(message.wParam);
-            for (auto it = impl_->registered_keys.cbegin(); it != impl_->registered_keys.cend(); ++it) {
-                if (it.value().native_id == native_id) {
-                    emit shortcutActivated(it.key());
-                    break;
-                }
-            }
-        }
-    });
+    impl_->event_filter = std::make_unique<WindowsHotkeyEventFilter>(this);
+    QCoreApplication::instance()->installNativeEventFilter(impl_->event_filter.get());
 #elif defined(Q_OS_UNIX)
     impl_->display = XOpenDisplay(nullptr);
     if (!impl_->display) {
@@ -252,25 +221,23 @@ GlobalShortcut::GlobalShortcut()
     qWarning() << "Global shortcuts are not implemented on this platform";
     return;
 #endif
-
-    impl_->event_timer->start(50);
 }
 
 GlobalShortcut::~GlobalShortcut() {
     unregisterAll();
 
-#if defined(Q_OS_WIN) || defined(Q_OS_UNIX)
+#if defined(Q_OS_WIN)
+    if (impl_->event_filter && QCoreApplication::instance()) {
+        QCoreApplication::instance()->removeNativeEventFilter(impl_->event_filter.get());
+    }
+#elif defined(Q_OS_UNIX)
     if (impl_->event_timer) {
         impl_->event_timer->stop();
         delete impl_->event_timer;
     }
 #endif
 
-#if defined(Q_OS_WIN)
-    if (impl_->message_window) {
-        DestroyWindow(impl_->message_window);
-    }
-#elif defined(Q_OS_UNIX)
+#if defined(Q_OS_UNIX)
     if (impl_->display) {
         XCloseDisplay(impl_->display);
     }
@@ -279,11 +246,6 @@ GlobalShortcut::~GlobalShortcut() {
 
 bool GlobalShortcut::registerShortcut(const QString& shortcut, const QString& id) {
 #if defined(Q_OS_WIN)
-    if (!impl_->message_window) {
-        qWarning() << "Hotkey message window not available";
-        return false;
-    }
-
     UINT virtual_key = 0;
     UINT modifiers = 0;
     if (!parseShortcut(shortcut, &virtual_key, &modifiers)) {
@@ -294,7 +256,7 @@ bool GlobalShortcut::registerShortcut(const QString& shortcut, const QString& id
     unregisterShortcut(id);
 
     const int native_id = impl_->next_hotkey_id++;
-    if (!RegisterHotKey(impl_->message_window, native_id, modifiers | MOD_NOREPEAT, virtual_key)) {
+    if (!RegisterHotKey(nullptr, native_id, modifiers | MOD_NOREPEAT, virtual_key)) {
         qWarning() << "Failed to register global shortcut:" << shortcut << "error:" << GetLastError();
         return false;
     }
@@ -340,12 +302,12 @@ bool GlobalShortcut::registerShortcut(const QString& shortcut, const QString& id
 
 void GlobalShortcut::unregisterShortcut(const QString& id) {
 #if defined(Q_OS_WIN)
-    if (!impl_->message_window || !impl_->registered_keys.contains(id)) {
+    if (!impl_->registered_keys.contains(id)) {
         return;
     }
 
     const auto registration = impl_->registered_keys.take(id);
-    UnregisterHotKey(impl_->message_window, registration.native_id);
+    UnregisterHotKey(nullptr, registration.native_id);
 #elif defined(Q_OS_UNIX)
     if (!impl_->display || !impl_->registered_keys.contains(id)) {
         return;
@@ -360,13 +322,8 @@ void GlobalShortcut::unregisterShortcut(const QString& id) {
 
 void GlobalShortcut::unregisterAll() {
 #if defined(Q_OS_WIN)
-    if (!impl_->message_window) {
-        impl_->registered_keys.clear();
-        return;
-    }
-
     for (auto it = impl_->registered_keys.cbegin(); it != impl_->registered_keys.cend(); ++it) {
-        UnregisterHotKey(impl_->message_window, it.value().native_id);
+        UnregisterHotKey(nullptr, it.value().native_id);
     }
     impl_->registered_keys.clear();
 #elif defined(Q_OS_UNIX)
@@ -382,6 +339,15 @@ void GlobalShortcut::unregisterAll() {
 #else
     impl_->registered_keys.clear();
 #endif
+}
+
+void GlobalShortcut::activateShortcutByNativeId(int native_id) {
+    for (auto it = impl_->registered_keys.cbegin(); it != impl_->registered_keys.cend(); ++it) {
+        if (it.value().native_id == native_id) {
+            emit shortcutActivated(it.key());
+            return;
+        }
+    }
 }
 
 } // namespace DesktopTranslate
