@@ -2,7 +2,6 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QEventLoop>
-#include <QMimeData>
 #include <QProcess>
 #include <QScreen>
 #include <QPixmap>
@@ -18,29 +17,59 @@ namespace DesktopTranslate {
 
 namespace {
 
-std::unique_ptr<QMimeData> cloneMimeData(const QMimeData* source) {
-    auto mimeData = std::make_unique<QMimeData>();
-    if (!source) {
-        return mimeData;
+QString elideCapturedText(const QString& text) {
+    if (text.size() <= 60) {
+        return text;
     }
-
-    for (const QString& format : source->formats()) {
-        mimeData->setData(format, source->data(format));
-    }
-
-    return mimeData;
+    return text.left(60) + "...";
 }
 
 #if defined(Q_OS_WIN)
+QString readUnicodeTextFromClipboard() {
+    if (!IsClipboardFormatAvailable(CF_UNICODETEXT)) {
+        return {};
+    }
+
+    HANDLE clipboardData = GetClipboardData(CF_UNICODETEXT);
+    if (!clipboardData) {
+        return {};
+    }
+
+    const auto* text = static_cast<const wchar_t*>(GlobalLock(clipboardData));
+    if (!text) {
+        return {};
+    }
+
+    const QString result = QString::fromWCharArray(text).trimmed();
+    GlobalUnlock(clipboardData);
+    return result;
+}
+
+QString readClipboardTextWithRetry() {
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        if (OpenClipboard(nullptr)) {
+            const QString text = readUnicodeTextFromClipboard();
+            CloseClipboard();
+            return text;
+        }
+        Sleep(20);
+    }
+
+    qWarning() << "Windows selection capture: OpenClipboard failed" << GetLastError();
+    return {};
+}
+
 bool sendCopyShortcutToForegroundWindow() {
     HWND foregroundWindow = GetForegroundWindow();
     if (!foregroundWindow) {
+        qWarning() << "Windows selection capture: no foreground window available";
         return false;
     }
 
     DWORD processId = 0;
     const DWORD threadId = GetWindowThreadProcessId(foregroundWindow, &processId);
     if (processId == GetCurrentProcessId()) {
+        qInfo() << "Windows selection capture: foreground window belongs to current process, skip Ctrl+C";
         return false;
     }
 
@@ -62,7 +91,15 @@ bool sendCopyShortcutToForegroundWindow() {
     inputs[3].type = INPUT_KEYBOARD;
     inputs[3].ki.wVk = VK_CONTROL;
     inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
-    return SendInput(4, inputs, sizeof(INPUT)) == 4;
+    const UINT sent = SendInput(4, inputs, sizeof(INPUT));
+    if (sent != 4) {
+        qWarning() << "Windows selection capture: SendInput failed" << GetLastError();
+        return false;
+    }
+
+    qInfo() << "Windows selection capture: sent Ctrl+C to target window" << Qt::hex
+            << quintptr(targetWindow);
+    return true;
 }
 #endif
 
@@ -93,34 +130,60 @@ QString ClipboardManager::captureSelectedTextFromActiveWindow() {
         return {};
     }
 
-    const QString previousText = clipboard->text(QClipboard::Clipboard);
-    auto previousMimeData = cloneMimeData(clipboard->mimeData(QClipboard::Clipboard));
+    const DWORD previousSequence = GetClipboardSequenceNumber();
 
-    QEventLoop loop;
-    QTimer timeoutTimer;
-    timeoutTimer.setSingleShot(true);
+    DWORD currentSequence = previousSequence;
+    QString capturedText;
+    bool clipboardChanged = false;
 
-    QObject::connect(clipboard, &QClipboard::dataChanged, &loop, &QEventLoop::quit);
-    QObject::connect(&timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    for (int attempt = 1; attempt <= 2; ++attempt) {
+        QEventLoop loop;
+        QTimer timeoutTimer;
+        timeoutTimer.setSingleShot(true);
 
-    if (!sendCopyShortcutToForegroundWindow()) {
-        return {};
+        QObject::connect(clipboard, &QClipboard::dataChanged, &loop, &QEventLoop::quit);
+        QObject::connect(&timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit);
+
+        qInfo() << "Windows selection capture: attempt" << attempt << "sending Ctrl+C";
+        emit selectionCaptureLogged(tr("Windows 划词复制：第 %1 次尝试发送 Ctrl+C").arg(attempt), "INFO");
+        if (!sendCopyShortcutToForegroundWindow()) {
+            emit selectionCaptureLogged(tr("Windows 划词复制：发送 Ctrl+C 失败"), "WARN");
+            break;
+        }
+
+        timeoutTimer.start(attempt == 1 ? 300 : 450);
+        loop.exec();
+
+        currentSequence = GetClipboardSequenceNumber();
+        clipboardChanged = currentSequence != previousSequence;
+        capturedText = readClipboardTextWithRetry();
+
+        if (clipboardChanged && !capturedText.isEmpty()) {
+            qInfo() << "Windows selection capture: clipboard updated after Ctrl+C, length ="
+                    << capturedText.size();
+            emit selectionCaptureLogged(
+                tr("Windows 划词复制：剪贴板已更新，获取到文本 %1")
+                    .arg(elideCapturedText(capturedText).toHtmlEscaped()),
+                "SUCCESS");
+            break;
+        }
+
+        qInfo() << "Windows selection capture: attempt" << attempt
+                << "did not produce usable clipboard text";
+        emit selectionCaptureLogged(
+            tr("Windows 划词复制：第 %1 次尝试未获取到有效剪贴板文本").arg(attempt),
+            "WARN");
+        QThread::msleep(80);
     }
 
-    timeoutTimer.start(250);
-    loop.exec();
-
-    const QString capturedText = clipboard->text(QClipboard::Clipboard).trimmed();
-
-    if (previousMimeData && !previousMimeData->formats().isEmpty()) {
-        clipboard->setMimeData(previousMimeData.release(), QClipboard::Clipboard);
-    } else if (previousText.isEmpty()) {
-        clipboard->clear(QClipboard::Clipboard);
-    } else {
-        clipboard->setText(previousText, QClipboard::Clipboard);
+    if (!capturedText.isEmpty() && clipboardChanged) {
+        emit selectionCaptureLogged(tr("Windows 划词复制：保留复制后的剪贴板内容"), "INFO");
+        return capturedText;
     }
 
-    return capturedText;
+    qInfo() << "Windows selection capture: no text captured from clipboard after Ctrl+C attempts";
+    emit selectionCaptureLogged(tr("Windows 划词复制：两次尝试后仍未获取到文本"), "WARN");
+    return clipboardChanged ? capturedText : QString();
 #else
     return {};
 #endif

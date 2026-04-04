@@ -28,6 +28,7 @@
 #include <QDialog>
 #include <QDateTime>
 #include <QLineEdit>
+#include <QPointer>
 
 #if defined(Q_OS_WIN)
 #include <windows.h>
@@ -228,6 +229,8 @@ void MainWindow::setupConnections() {
         current_selection_pos_ = QPoint(100, 100);  // 默认位置
         performTranslation(text);
     });
+    connect(&ClipboardManager::instance(), &ClipboardManager::selectionCaptureLogged,
+            test_window_.get(), &TestWindow::log);
 
     connect(result_window_.get(), &TranslationResultWindow::translateRequested,
             this, &MainWindow::onBubbleTranslateRequested);
@@ -295,28 +298,46 @@ void MainWindow::onSelectionComplete(const QRect& rect) {
     
     // 延迟截图，确保覆盖层完全隐藏
     QTimer::singleShot(100, this, [this, rect]() {
-        // 在后台线程进行 OCR 识别
-        std::thread([this, rect]() {
-            auto result = OCRService::instance().recognizeScreenArea(
-                rect.x(), rect.y(), rect.width(), rect.height()
-            );
-            
-            // 回到主线程处理结果
-            QMetaObject::invokeMethod(this, [this, result, rect]() {
-                // 显示截图预览
-                if (!result.screenshot.isNull()) {
-                    test_window_->showScreenshot(result.screenshot);
+        const QImage screenshot = OCRService::instance().captureScreenArea(
+            rect.x(), rect.y(), rect.width(), rect.height()
+        );
+
+        if (screenshot.isNull()) {
+            test_window_->log(tr("OCR 识别失败: %1").arg(tr("截图失败")), "ERROR");
+            test_window_->setStatus(tr("OCR 失败"), "red");
+            tray_icon_->showMessage(tr("OCR 识别失败"), tr("截图失败"), QSystemTrayIcon::Warning, 2000);
+            return;
+        }
+
+        test_window_->showScreenshot(screenshot);
+
+        QPointer<MainWindow> self(this);
+        std::thread([self, screenshot]() {
+            OCRResult result;
+            result.screenshot = screenshot;
+            auto ocrResult = OCRService::instance().recognizeText(screenshot);
+            result.success = ocrResult.success;
+            result.text = ocrResult.text;
+            result.error = ocrResult.error;
+
+            if (!self) {
+                return;
+            }
+
+            QMetaObject::invokeMethod(self.data(), [self, result]() {
+                if (!self) {
+                    return;
                 }
-                
+
                 if (result.success && !result.text.isEmpty()) {
-                    test_window_->log(tr("OCR 识别成功，获取到文本: %1").arg(
+                    self->test_window_->log(self->tr("OCR 识别成功，获取到文本: %1").arg(
                         result.text.left(50) + (result.text.length() > 50 ? "..." : "")), "SUCCESS");
-                    test_window_->setStatus(tr("翻译中"), "blue");
-                    performTranslation(result.text);
+                    self->test_window_->setStatus(self->tr("翻译中"), "blue");
+                    self->performTranslation(result.text);
                 } else {
-                    test_window_->log(tr("OCR 识别失败: %1").arg(result.error), "ERROR");
-                    test_window_->setStatus(tr("OCR 失败"), "red");
-                    tray_icon_->showMessage(tr("OCR 识别失败"), result.error, QSystemTrayIcon::Warning, 2000);
+                    self->test_window_->log(self->tr("OCR 识别失败: %1").arg(result.error), "ERROR");
+                    self->test_window_->setStatus(self->tr("OCR 失败"), "red");
+                    self->tray_icon_->showMessage(self->tr("OCR 识别失败"), result.error, QSystemTrayIcon::Warning, 2000);
                 }
             }, Qt::QueuedConnection);
         }).detach();

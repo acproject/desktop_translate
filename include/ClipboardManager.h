@@ -23,6 +23,7 @@ public:
 
 signals:
     void textCopied(const QString& text);
+    void selectionCaptureLogged(const QString& message, const QString& level);
 
 private:
     ClipboardManager();

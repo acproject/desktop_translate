@@ -286,41 +286,37 @@ OCRResult OCRService::recognizeText(const QString& imagePath) {
     return recognizeText(image);
 }
 
-OCRResult OCRService::recognizeScreenArea(int x, int y, int width, int height) {
-    OCRResult result;
-    
+QImage OCRService::captureScreenArea(int x, int y, int width, int height) {
     qDebug() << "Input screen area:" << x << y << width << height;
-    
-    // 截取屏幕区域
+
     QScreen* screen = QGuiApplication::primaryScreen();
     if (!screen) {
-        result.error = "No screen available";
-        return result;
+        return {};
     }
-    
-    // 获取屏幕几何信息
+
     QRect screenGeometry = screen->geometry();
     qDebug() << "Screen geometry:" << screenGeometry;
     qDebug() << "Device pixel ratio:" << screen->devicePixelRatio();
-    
-    // grabWindow 使用的是物理像素坐标
-    // 在高DPI屏幕上，需要乘以 devicePixelRatio
-    // 但是 grabWindow 的坐标原点在虚拟屏幕的左上角
-    // 直接使用逻辑坐标进行截图，不缩放
-    // Qt 会自动处理坐标转换
+
     QPixmap pixmap = screen->grabWindow(0, x, y, width, height);
-    
     if (pixmap.isNull()) {
+        return {};
+    }
+
+    QImage image = pixmap.toImage();
+    qDebug() << "Captured image size:" << image.width() << "x" << image.height();
+    return image;
+}
+
+OCRResult OCRService::recognizeScreenArea(int x, int y, int width, int height) {
+    OCRResult result;
+    QImage image = captureScreenArea(x, y, width, height);
+    if (image.isNull()) {
         result.error = "Failed to capture screen area";
         return result;
     }
-    
-    QImage image = pixmap.toImage();
-    qDebug() << "Captured image size:" << image.width() << "x" << image.height();
-    
-    // 保存截图到结果中
+
     result.screenshot = image;
-    
     auto ocrResult = recognizeText(image);
     result.success = ocrResult.success;
     result.text = ocrResult.text;

@@ -1,7 +1,6 @@
 #ifndef OCRSERVICE_H
 #define OCRSERVICE_H
 
-#include <QObject>
 #include <QString>
 #include <QImage>
 #include <memory>
@@ -21,9 +20,7 @@ struct OCRResult {
 /**
  * @brief OCR识别服务 - 支持多种OCR后端
  */
-class OCRService : public QObject {
-    Q_OBJECT
-
+class OCRService {
 public:
     static OCRService& instance();
 
@@ -35,8 +32,7 @@ public:
     // 识别图片中的文字
     OCRResult recognizeText(const QImage& image);
     OCRResult recognizeText(const QString& imagePath);
-    
-    // 识别屏幕区域
+    QImage captureScreenArea(int x, int y, int width, int height);
     OCRResult recognizeScreenArea(int x, int y, int width, int height);
 
 private:
