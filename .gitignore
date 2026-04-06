@@ -4,5 +4,6 @@ build-debug
 build-release
 dist
 build-*
-models
 third_party/llama.cpp/build
+models/HY-MT1.5-1.8B-GGUF
+models/PaddleOCR-VL-1.5-GGUF
