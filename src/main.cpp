@@ -36,7 +36,7 @@ QIcon loadApplicationIcon() {
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("DesktopTranslate");
-    app.setApplicationVersion("1.0.4");
+    app.setApplicationVersion("");
 #if defined(Q_OS_LINUX)
     app.setDesktopFileName("desktop-translate");
 #endif

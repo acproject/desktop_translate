@@ -1,7 +1,0 @@
-模型放在这里
-推荐的模型为：
-- 翻译使用：
-    × HY-MT1.5-1.8B-GGUF
-
-- OCR
-    × PaddleOCR-VL-1.5-GGUF

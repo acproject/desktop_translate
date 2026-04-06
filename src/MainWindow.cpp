@@ -687,7 +687,7 @@ void MainWindow::onSettingsAction() {
 void MainWindow::onAboutAction() {
     QMessageBox::about(this, tr("关于"),
         tr("<h3>桌面翻译工具</h3>"
-           "<p>版本: 1.0.4</p>"
+           "<p>版本: 1.0.5</p>"
            "<p>一个简单的桌面翻译工具，支持框选翻译。</p>"
            "<p>使用本地大模型API（OpenAI兼容）进行翻译。</p>"
            "<hr>"
