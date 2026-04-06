@@ -26,6 +26,9 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
+option(DESKTOP_TRANSLATE_BUILD_LLAMA "Build bundled llama.cpp" ON)
+option(DESKTOP_TRANSLATE_ENABLE_LLAMA_CUDA "Enable CUDA backend for bundled llama.cpp" ON)
+
 # Qt6 路径设置（如果需要）
 # set(CMAKE_PREFIX_PATH "/path/to/Qt/6.x.x/gcc_64")
 
@@ -37,14 +40,38 @@ if(UNIX AND NOT APPLE)
     find_package(X11 REQUIRED)
 endif()
 
-# nlohmann_json - 使用 FetchContent 自动下载
-include(FetchContent)
-FetchContent_Declare(
-    json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.3
-)
-FetchContent_MakeAvailable(json)
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+add_subdirectory(third_party/json EXCLUDE_FROM_ALL)
+
+if(DESKTOP_TRANSLATE_BUILD_LLAMA)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp/CMakeLists.txt")
+        message(FATAL_ERROR "third_party/llama.cpp is missing. Run git submodule update --init --recursive third_party/llama.cpp")
+    endif()
+
+    if(NOT DEFINED LLAMA_BUILD_COMMON)
+        set(LLAMA_BUILD_COMMON ON CACHE BOOL "")
+    endif()
+    if(NOT DEFINED LLAMA_BUILD_TESTS)
+        set(LLAMA_BUILD_TESTS OFF CACHE BOOL "")
+    endif()
+    if(NOT DEFINED LLAMA_BUILD_TOOLS)
+        set(LLAMA_BUILD_TOOLS ON CACHE BOOL "")
+    endif()
+    if(NOT DEFINED LLAMA_BUILD_EXAMPLES)
+        set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "")
+    endif()
+    if(NOT DEFINED LLAMA_BUILD_SERVER)
+        set(LLAMA_BUILD_SERVER ON CACHE BOOL "")
+    endif()
+    if(NOT DEFINED LLAMA_BUILD_WEBUI)
+        set(LLAMA_BUILD_WEBUI OFF CACHE BOOL "")
+    endif()
+    if(NOT DEFINED GGML_CUDA)
+        set(GGML_CUDA ${DESKTOP_TRANSLATE_ENABLE_LLAMA_CUDA} CACHE BOOL "")
+    endif()
+
+    add_subdirectory(third_party/llama.cpp)
+endif()
 
 # 源文件
 set(SOURCES
@@ -108,6 +135,10 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     CURL::libcurl
     nlohmann_json::nlohmann_json
 )
+
+if(DESKTOP_TRANSLATE_BUILD_LLAMA)
+    target_link_libraries(${PROJECT_NAME} PRIVATE llama)
+endif()
 
 if(UNIX AND NOT APPLE)
     target_link_libraries(${PROJECT_NAME} PRIVATE ${X11_LIBRARIES})

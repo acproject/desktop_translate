@@ -210,7 +210,7 @@ GlobalShortcut::GlobalShortcut()
 
             auto* key_event = &event.xkey;
             for (auto it = impl_->registered_keys.cbegin(); it != impl_->registered_keys.cend(); ++it) {
-                if (it.value() == key_event->keycode) {
+                if (it.value() == static_cast<int>(key_event->keycode)) {
                     emit shortcutActivated(it.key());
                     break;
                 }
@@ -342,12 +342,16 @@ void GlobalShortcut::unregisterAll() {
 }
 
 void GlobalShortcut::activateShortcutByNativeId(int native_id) {
+#if defined(Q_OS_WIN)
     for (auto it = impl_->registered_keys.cbegin(); it != impl_->registered_keys.cend(); ++it) {
         if (it.value().native_id == native_id) {
             emit shortcutActivated(it.key());
             return;
         }
     }
+#else
+    Q_UNUSED(native_id)
+#endif
 }
 
 } // namespace DesktopTranslate

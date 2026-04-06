@@ -228,8 +228,14 @@ QString ModelServiceManager::llamaServerPath() const {
 #endif
 
     const QString thirdPartyRoot = QDir(projectRootPath()).filePath("third_party/llama.cpp");
+    const QString buildRoot = QDir(projectRootPath()).filePath("build");
 
     return firstExistingPath({
+        QDir(buildRoot).filePath("bin/" + executableName),
+        QDir(buildRoot).filePath("bin/Release/" + executableName),
+        QDir(buildRoot).filePath("bin/Debug/" + executableName),
+        QDir(buildRoot).filePath("bin/RelWithDebInfo/" + executableName),
+        QDir(buildRoot).filePath("bin/MinSizeRel/" + executableName),
         QDir(thirdPartyRoot).filePath("build/bin/" + executableName),
         QDir(thirdPartyRoot).filePath("build/bin/Release/" + executableName),
         QDir(thirdPartyRoot).filePath("build/bin/Debug/" + executableName),
