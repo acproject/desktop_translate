@@ -6,6 +6,7 @@
 #include <cctype>
 #include <sstream>
 #include <iostream>
+#include <string_view>
 #include <vector>
 #include <QDebug>
 #include <nlohmann/json.hpp>
@@ -45,6 +46,12 @@ std::string normalizeLineEndings(const std::string& value) {
     }
 
     return normalized;
+}
+
+bool endsWith(const std::string& value, const char* suffix) {
+    const std::string_view suffixView(suffix);
+    return value.size() >= suffixView.size()
+        && value.compare(value.size() - suffixView.size(), suffixView.size(), suffixView.data()) == 0;
 }
 
 std::string sanitizeTextForRequest(const std::string& value) {
@@ -130,7 +137,7 @@ bool shouldMergeLines(const std::string& previousLine, const std::string& curren
     }
 
     const char lastChar = previousLine.back();
-    if (lastChar == ':' || previousLine.ends_with("\xEF\xBC\x9A")) {
+    if (lastChar == ':' || endsWith(previousLine, "\xEF\xBC\x9A")) {
         return false;
     }
 
