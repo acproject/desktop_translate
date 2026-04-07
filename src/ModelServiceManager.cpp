@@ -7,6 +7,10 @@
 #include <QTimer>
 #include <QDebug>
 
+#if defined(Q_OS_WIN)
+#include <windows.h>
+#endif
+
 namespace DesktopTranslate {
 
 namespace {
@@ -39,8 +43,21 @@ QString trimLogLine(QString line) {
     return line.trimmed();
 }
 
+void configureProcessWindowBehavior(QProcess* process) {
+#if defined(Q_OS_WIN)
+    process->setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* arguments) {
+        arguments->flags |= CREATE_NO_WINDOW;
+        arguments->startupInfo->dwFlags |= STARTF_USESHOWWINDOW;
+        arguments->startupInfo->wShowWindow = SW_HIDE;
+    });
+#else
+    Q_UNUSED(process)
+#endif
+}
+
 bool llamaServerHasOffloadDevice(const QString& executablePath) {
     QProcess probe;
+    configureProcessWindowBehavior(&probe);
     probe.setProgram(executablePath);
     probe.setArguments({"--list-devices"});
     probe.setProcessChannelMode(QProcess::MergedChannels);
@@ -164,6 +181,7 @@ QProcess* ModelServiceManager::ensureProcess(ServiceKind kind, const QString& na
     }
 
     process = new QProcess(this);
+    configureProcessWindowBehavior(process);
     process->setProcessChannelMode(QProcess::MergedChannels);
 
     connect(process, &QProcess::started, this, [name]() {

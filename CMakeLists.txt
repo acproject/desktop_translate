@@ -41,7 +41,11 @@ if(UNIX AND NOT APPLE)
 endif()
 
 set(JSON_BuildTests OFF CACHE INTERNAL "")
-add_subdirectory(third_party/json EXCLUDE_FROM_ALL)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/json/CMakeLists.txt")
+    add_subdirectory(third_party/json EXCLUDE_FROM_ALL)
+else()
+    find_package(nlohmann_json CONFIG REQUIRED)
+endif()
 
 if(DESKTOP_TRANSLATE_BUILD_LLAMA)
     if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp/CMakeLists.txt")
@@ -104,10 +108,17 @@ set(HEADERS
 )
 
 # 可执行文件
-add_executable(${PROJECT_NAME}
-    ${SOURCES}
-    ${HEADERS}
-)
+if(WIN32)
+    add_executable(${PROJECT_NAME} WIN32
+        ${SOURCES}
+        ${HEADERS}
+    )
+else()
+    add_executable(${PROJECT_NAME}
+        ${SOURCES}
+        ${HEADERS}
+    )
+endif()
 
 # 包含目录
 target_include_directories(${PROJECT_NAME} PRIVATE
