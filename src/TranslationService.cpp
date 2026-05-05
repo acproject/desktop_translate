@@ -193,6 +193,67 @@ std::string preprocessTextForTranslation(const std::string& text) {
     return trimWhitespace(normalizedText.str());
 }
 
+std::string stripTextTags(const std::string& value) {
+    std::string cleaned = value;
+
+    const std::string openTag = "<text>";
+    const std::string closeTag = "</text>";
+
+    auto isWhitespaceOnly = [](const std::string& s) -> bool {
+        for (size_t i = 0; i < s.size(); ++i) {
+            if (!std::isspace(static_cast<unsigned char>(s[i]))) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    size_t openPos = cleaned.find(openTag);
+    while (openPos != std::string::npos) {
+        size_t afterOpen = openPos + openTag.size();
+        size_t closePos = cleaned.find(closeTag, afterOpen);
+
+        if (closePos != std::string::npos) {
+            std::string before = cleaned.substr(0, openPos);
+            std::string inner = cleaned.substr(afterOpen, closePos - afterOpen);
+            std::string after = cleaned.substr(closePos + closeTag.size());
+
+            if (isWhitespaceOnly(before) && isWhitespaceOnly(after)) {
+                cleaned = trimWhitespace(inner);
+            } else {
+                cleaned = before + inner + after;
+            }
+        } else {
+            std::string before = cleaned.substr(0, openPos);
+            std::string inner = cleaned.substr(afterOpen);
+            if (isWhitespaceOnly(before)) {
+                cleaned = trimWhitespace(inner);
+            } else {
+                cleaned = before + inner;
+            }
+        }
+
+        openPos = cleaned.find(openTag);
+    }
+
+    size_t closePos = cleaned.find(closeTag);
+    while (closePos != std::string::npos) {
+        size_t afterClose = closePos + closeTag.size();
+        std::string before = cleaned.substr(0, closePos);
+        std::string after = cleaned.substr(afterClose);
+
+        if (isWhitespaceOnly(after)) {
+            cleaned = trimWhitespace(before);
+        } else {
+            cleaned = before + after;
+        }
+
+        closePos = cleaned.find(closeTag);
+    }
+
+    return trimWhitespace(cleaned);
+}
+
 std::string removeThinkBlocks(const std::string& value) {
     std::string cleaned = value;
     const std::string openTag = "<think>";
@@ -477,12 +538,12 @@ TranslationResult TranslationService::parseResponse(const std::string& response,
             auto content = message.contains("content") ? message["content"] : nlohmann::json{};
             qDebug() << "Content type:" << content.type_name();
 
-            result.translated_text = trimWhitespace(removeThinkBlocks(extractContentText(content)));
+            result.translated_text = stripTextTags(trimWhitespace(removeThinkBlocks(extractContentText(content))));
 
             if (result.translated_text.empty() && message.contains("reasoning_content")) {
                 auto reasoningContent = message["reasoning_content"];
                 if (reasoningContent.is_string()) {
-                    result.translated_text = extractTranslationFromReasoning(reasoningContent.get<std::string>());
+                    result.translated_text = stripTextTags(extractTranslationFromReasoning(reasoningContent.get<std::string>()));
                     qDebug() << "Extracted from reasoning_content:" << QString::fromStdString(result.translated_text.substr(0, 200));
                 }
             }
