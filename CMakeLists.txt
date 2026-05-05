@@ -162,9 +162,22 @@ if(WIN32 AND Qt6_DIR)
     set(_qt_windeployqt "${_qt6_triplet_root}/tools/Qt6/bin/windeployqt.exe")
 
     if(EXISTS "${_qt_windeployqt}")
+        set(_deploy_qt_script "${CMAKE_BINARY_DIR}/deploy_qt.cmake")
+        file(WRITE "${_deploy_qt_script}" [=[
+execute_process(
+    COMMAND "${DEPLOYQT}" --no-translations "${TARGET}"
+    RESULT_VARIABLE _result
+)
+if(NOT _result EQUAL 0)
+    message(WARNING "windeployqt failed (code ${_result}), Qt DLLs may need to be deployed manually")
+endif()
+]=])
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-            COMMAND "${_qt_windeployqt}" --no-translations "$<TARGET_FILE:${PROJECT_NAME}>"
-            VERBATIM
+            COMMAND "${CMAKE_COMMAND}"
+                -DDEPLOYQT="${_qt_windeployqt}"
+                -DTARGET=$<TARGET_FILE:${PROJECT_NAME}>
+                -P "${_deploy_qt_script}"
+            COMMENT "Deploying Qt6 dependencies (non-fatal)"
         )
     endif()
 endif()
