@@ -1,4 +1,6 @@
-# Desktop Translate
+# Desktop Translate  
+
+#### [English](README.md) |  [中文](README_ZH.md)
 
 A simple desktop translation tool that supports region selection translation, clipboard translation, and floating bubble translation. Uses local large model API (OpenAI compatible) for translation.
 

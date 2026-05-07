@@ -1,5 +1,9 @@
 # Desktop Translate
 
+#### [English](README.md) |  [中文](README_ZH.md)
+
+## 介绍
+
 一个简单的桌面翻译工具，支持框选翻译、剪贴板翻译和悬浮气泡翻译。使用本地大模型 API（OpenAI 兼容）进行翻译。
 
 ## 功能特性
