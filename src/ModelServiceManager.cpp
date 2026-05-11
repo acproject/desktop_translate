@@ -15,6 +15,19 @@ namespace DesktopTranslate {
 
 namespace {
 
+bool isTruthyEnvironmentValue(const QByteArray& value) {
+    const QByteArray normalized = value.trimmed().toLower();
+    return normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on";
+}
+
+bool shouldForceCpuBackend() {
+    if (!qEnvironmentVariableIsSet("DESKTOP_TRANSLATE_LLAMA_FORCE_CPU")) {
+        return false;
+    }
+
+    return isTruthyEnvironmentValue(qgetenv("DESKTOP_TRANSLATE_LLAMA_FORCE_CPU"));
+}
+
 QString firstExistingPath(const QStringList& candidates) {
     for (const QString& candidate : candidates) {
         if (QFileInfo::exists(candidate)) {
@@ -140,7 +153,8 @@ void ModelServiceManager::startService(const ServiceSpec& spec) {
         return;
     }
 
-    const bool useGpuOffload = llamaServerHasOffloadDevice(executablePath);
+    const bool forceCpu = shouldForceCpuBackend();
+    const bool useGpuOffload = !forceCpu && llamaServerHasOffloadDevice(executablePath);
     QStringList arguments = {
         "--host", "127.0.0.1",
         "--port", QString::number(spec.port),
@@ -172,6 +186,12 @@ void ModelServiceManager::startService(const ServiceSpec& spec) {
                              .arg(QDir::toNativeSeparators(spec.modelPath));
     qInfo().noquote() << QStringLiteral("%1 model service backend: %2")
                              .arg(spec.name, useGpuOffload ? QStringLiteral("GPU") : QStringLiteral("CPU"));
+    if (forceCpu) {
+        qInfo().noquote() << QStringLiteral("%1 model service forced to CPU via DESKTOP_TRANSLATE_LLAMA_FORCE_CPU")
+                                 .arg(spec.name);
+    }
+    qInfo().noquote() << QStringLiteral("%1 model service command: %2 %3")
+                             .arg(spec.name, QDir::toNativeSeparators(executablePath), arguments.join(' '));
 }
 
 QProcess* ModelServiceManager::ensureProcess(ServiceKind kind, const QString& name) {
