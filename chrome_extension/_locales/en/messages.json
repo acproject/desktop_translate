@@ -1,0 +1,17 @@
+{
+  "extensionName": {
+    "message": "Web Translate Assistant"
+  },
+  "extensionDescription": {
+    "message": "Local LLM powered web translation extension with text translation, image OCR translation and mouse gesture summary"
+  },
+  "commandTranslateSelection": {
+    "message": "Translate selected text"
+  },
+  "commandTranslatePage": {
+    "message": "Translate entire page"
+  },
+  "commandSummarizePage": {
+    "message": "Summarize page content"
+  }
+}

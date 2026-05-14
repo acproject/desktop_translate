@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>网页翻译助手 - 设置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="options-container">
+    <nav class="options-nav">
+      <div class="nav-brand">
+        <span class="nav-logo">🌐</span>
+        <span class="nav-title">网页翻译助手</span>
+      </div>
+      <div class="nav-tabs">
+        <button class="nav-tab active" data-tab="api">API 配置</button>
+        <button class="nav-tab" data-tab="translate">翻译设置</button>
+        <button class="nav-tab" data-tab="gesture">手势设置</button>
+        <button class="nav-tab" data-tab="history">历史记录</button>
+      </div>
+    </nav>
+
+    <div class="options-content">
+      <div class="tab-panel active" id="tab-api">
+        <h2>翻译 API 配置</h2>
+        <div class="form-section">
+          <h3>翻译服务</h3>
+          <div class="form-group">
+            <label for="translate-api-host">API 地址</label>
+            <input type="text" id="translate-api-host" placeholder="http://127.0.0.1">
+          </div>
+          <div class="form-group">
+            <label for="translate-api-port">端口</label>
+            <input type="number" id="translate-api-port" placeholder="8110">
+          </div>
+          <div class="form-group">
+            <label for="translate-api-key">API Key</label>
+            <input type="password" id="translate-api-key" placeholder="本地服务通常不需要">
+          </div>
+          <div class="form-group">
+            <label for="translate-model">模型名称</label>
+            <input type="text" id="translate-model" placeholder="HY-MT1.5-1.8B-Q8_0">
+          </div>
+          <div class="form-group">
+            <label for="api-timeout">超时时间（秒）</label>
+            <input type="number" id="api-timeout" min="10" max="600" placeholder="180">
+          </div>
+          <button class="btn-test" id="btn-test-translate">测试连接</button>
+        </div>
+
+        <div class="form-section">
+          <h3>OCR 服务</h3>
+          <div class="form-group">
+            <label for="ocr-api-host">API 地址</label>
+            <input type="text" id="ocr-api-host" placeholder="http://127.0.0.1">
+          </div>
+          <div class="form-group">
+            <label for="ocr-api-port">端口</label>
+            <input type="number" id="ocr-api-port" placeholder="8111">
+          </div>
+          <div class="form-group">
+            <label for="ocr-api-key">API Key</label>
+            <input type="password" id="ocr-api-key" placeholder="本地服务通常不需要">
+          </div>
+          <div class="form-group">
+            <label for="ocr-model">模型名称</label>
+            <input type="text" id="ocr-model" placeholder="PaddleOCR-VL-1.5-GGUF">
+          </div>
+          <button class="btn-test" id="btn-test-ocr">测试连接</button>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-translate">
+        <h2>翻译设置</h2>
+        <div class="form-section">
+          <h3>语言设置</h3>
+          <div class="form-group">
+            <label for="source-language">源语言</label>
+            <select id="source-language">
+              <option value="auto">自动检测</option>
+              <option value="en">English</option>
+              <option value="zh">中文</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+              <option value="fr">Français</option>
+              <option value="de">Deutsch</option>
+              <option value="es">Español</option>
+              <option value="ru">Русский</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="target-language">目标语言</label>
+            <select id="target-language">
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+              <option value="fr">Français</option>
+              <option value="de">Deutsch</option>
+              <option value="es">Español</option>
+              <option value="ru">Русский</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3>功能开关</h3>
+          <div class="toggle-group">
+            <div class="toggle-item">
+              <div>
+                <div class="toggle-label">文字翻译</div>
+                <div class="toggle-desc">双击或选中文本后翻译</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="opt-enable-text-translate" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="toggle-item">
+              <div>
+                <div class="toggle-label">图片翻译</div>
+                <div class="toggle-desc">悬停图片时显示翻译按钮</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="opt-enable-image-translate" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="toggle-item">
+              <div>
+                <div class="toggle-label">右键菜单</div>
+                <div class="toggle-desc">在右键菜单中添加翻译选项</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="opt-enable-context-menu" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3>自定义提示词</h3>
+          <div class="form-group">
+            <label for="translate-prompt">翻译提示词</label>
+            <textarea id="translate-prompt" rows="3" placeholder="请将以下文本翻译为{target}，只返回翻译结果：&#10;&#10;{text}"></textarea>
+            <span class="form-hint">可用变量: {target} 目标语言, {text} 待翻译文本</span>
+          </div>
+          <div class="form-group">
+            <label for="ocr-prompt">OCR 提示词</label>
+            <textarea id="ocr-prompt" rows="2" placeholder="请识别图片中的所有文字，只输出识别到的文字内容："></textarea>
+          </div>
+          <div class="form-group">
+            <label for="summarize-prompt">总结提示词</label>
+            <textarea id="summarize-prompt" rows="3" placeholder="请用{target}总结以下网页内容，提取关键信息：&#10;&#10;{text}"></textarea>
+            <span class="form-hint">可用变量: {target} 目标语言, {text} 网页内容</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-gesture">
+        <h2>鼠标手势设置</h2>
+        <div class="form-section">
+          <h3>基本设置</h3>
+          <div class="toggle-item">
+            <div>
+              <div class="toggle-label">启用手势</div>
+              <div class="toggle-desc">按住鼠标右键拖动触发手势</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="opt-enable-gesture" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label for="gesture-button">触发按键</label>
+            <select id="gesture-button">
+              <option value="right">右键</option>
+              <option value="middle">中键</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="gesture-threshold">触发距离（像素）</label>
+            <input type="number" id="gesture-threshold" min="10" max="100" placeholder="30">
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3>手势说明</h3>
+          <div class="gesture-guide">
+            <div class="gesture-item">
+              <div class="gesture-icon">↑</div>
+              <div class="gesture-info">
+                <div class="gesture-name">向上滑动</div>
+                <div class="gesture-desc">翻译选中的文字</div>
+              </div>
+            </div>
+            <div class="gesture-item">
+              <div class="gesture-icon">↓</div>
+              <div class="gesture-info">
+                <div class="gesture-name">向下滑动</div>
+                <div class="gesture-desc">总结当前页面内容</div>
+              </div>
+            </div>
+            <div class="gesture-item">
+              <div class="gesture-icon">←</div>
+              <div class="gesture-info">
+                <div class="gesture-name">向左滑动</div>
+                <div class="gesture-desc">翻译整个页面</div>
+              </div>
+            </div>
+            <div class="gesture-item">
+              <div class="gesture-icon">→</div>
+              <div class="gesture-info">
+                <div class="gesture-name">向右滑动</div>
+                <div class="gesture-desc">翻译鼠标悬停的图片</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-history">
+        <h2>翻译历史</h2>
+        <div class="history-toolbar">
+          <span id="history-count">0 条记录</span>
+          <button class="btn-danger" id="btn-clear-history">清空历史</button>
+        </div>
+        <div id="history-list" class="history-list"></div>
+      </div>
+    </div>
+
+    <div class="options-footer">
+      <button class="btn-primary" id="btn-save">保存设置</button>
+      <button class="btn-secondary" id="btn-reset">恢复默认</button>
+      <span class="save-status" id="save-status"></span>
+    </div>
+  </div>
+
+  <script src="../utils/storage.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

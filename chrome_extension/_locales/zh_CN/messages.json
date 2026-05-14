@@ -1,0 +1,17 @@
+{
+  "extensionName": {
+    "message": "网页翻译助手"
+  },
+  "extensionDescription": {
+    "message": "基于本地大模型的网页翻译插件，支持文字翻译、图片OCR翻译和鼠标手势摘要"
+  },
+  "commandTranslateSelection": {
+    "message": "翻译选中的文字"
+  },
+  "commandTranslatePage": {
+    "message": "翻译整个页面"
+  },
+  "commandSummarizePage": {
+    "message": "总结页面内容"
+  }
+}
