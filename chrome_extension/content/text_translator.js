@@ -2,6 +2,8 @@ class TextTranslator {
   constructor() {
     this.translatingElements = new WeakMap();
     this.originalTexts = new WeakMap();
+    this.originalPageTexts = new WeakMap();
+    this.pageTranslationCache = new Map();
   }
 
   async translateSelection() {
@@ -31,22 +33,51 @@ class TextTranslator {
   }
 
   async translatePage() {
-    const bodyText = document.body.innerText;
-    if (!bodyText.trim()) {
+    const textNodes = this._collectPageTextNodes();
+    if (textNodes.length === 0) {
       this._showTooltip('页面没有可翻译的内容', 'warning');
       return;
     }
 
-    const truncated = bodyText.substring(0, 8000);
     this._showPageLoading();
-    const result = await this._sendTranslateRequest(truncated);
+    let translatedCount = 0;
+    let successCount = 0;
+
+    for (const node of textNodes) {
+      const originalText = node.nodeValue;
+      const normalizedText = originalText.trim();
+      if (!normalizedText) {
+        translatedCount += 1;
+        continue;
+      }
+
+      this._updatePageLoading(`正在翻译页面内容... ${translatedCount + 1}/${textNodes.length}`);
+
+      let result = this.pageTranslationCache.get(normalizedText);
+      if (!result) {
+        result = await this._sendTranslateRequest(normalizedText);
+        this.pageTranslationCache.set(normalizedText, result);
+      }
+
+      if (result.success && result.translatedText.trim()) {
+        if (!this.originalPageTexts.has(node)) {
+          this.originalPageTexts.set(node, originalText);
+        }
+        node.nodeValue = originalText.replace(normalizedText, result.translatedText.trim());
+        successCount += 1;
+      }
+
+      translatedCount += 1;
+    }
+
     this._hidePageLoading();
 
-    if (result.success) {
-      this._showPageResult(result.translatedText);
-    } else {
-      this._showTooltip(result.error || '翻译失败', 'error');
+    if (successCount > 0) {
+      this._showTooltip(`已直接替换 ${successCount} 处页面文本`, 'success');
+      return;
     }
+
+    this._showTooltip('页面翻译失败', 'error');
   }
 
   async translateElement(element) {
@@ -221,6 +252,14 @@ class TextTranslator {
     document.body.appendChild(overlay);
   }
 
+  _updatePageLoading(message) {
+    const overlay = document.getElementById('dt-page-loading');
+    const label = overlay ? overlay.querySelector('span') : null;
+    if (label) {
+      label.textContent = message;
+    }
+  }
+
   _hidePageLoading() {
     const overlay = document.getElementById('dt-page-loading');
     if (overlay) overlay.remove();
@@ -248,6 +287,54 @@ class TextTranslator {
         resolve(response || { success: false, error: '无法连接到翻译服务' });
       });
     });
+  }
+
+  _collectPageTextNodes() {
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: (node) => {
+          if (!node || !node.parentElement) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          if (this.originalPageTexts.has(node)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          const parent = node.parentElement;
+          const tagName = parent.tagName;
+          if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'OPTION'].includes(tagName)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          if (parent.closest('[contenteditable="true"], #dt-result-popup, #dt-page-result, #dt-page-loading, .dt-popup, .dt-tooltip')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          const text = node.nodeValue;
+          if (!text || !text.trim()) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          if (text.trim().length < 2) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+
+    const nodes = [];
+    let currentNode = walker.nextNode();
+    while (currentNode) {
+      nodes.push(currentNode);
+      currentNode = walker.nextNode();
+    }
+
+    return nodes;
   }
 
   _escapeHtml(text) {

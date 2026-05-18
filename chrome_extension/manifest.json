@@ -11,13 +11,18 @@
     "scripting"
   ],
   "host_permissions": [
-    "http://127.0.0.1:*/*",
-    "http://localhost:*/*"
+    "http://127.0.0.1/*",
+    "http://localhost/*"
   ],
   "background": {
-    "service_worker": "background/service_worker.js",
-    "type": "module"
+    "service_worker": "background/service_worker.js"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["utils/storage.js", "utils/api.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

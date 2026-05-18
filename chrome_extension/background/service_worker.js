@@ -1,4 +1,7 @@
-importScripts('utils/storage.js', 'utils/api.js');
+importScripts(
+  chrome.runtime.getURL('utils/storage.js'),
+  chrome.runtime.getURL('utils/api.js')
+);
 
 chrome.runtime.onInstalled.addListener(async () => {
   const config = await Storage.getConfig();

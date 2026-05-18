@@ -1,6 +1,11 @@
 class TranslateAPI {
+  static _buildUrl(host, port, path) {
+    let cleanHost = host.replace(/\/+$/, '');
+    return `${cleanHost}:${port}${path}`;
+  }
+
   static async translate(text, config) {
-    const url = `${config.translateApiHost}:${config.translateApiPort}/v1/chat/completions`;
+    const url = this._buildUrl(config.translateApiHost, config.translateApiPort, '/v1/chat/completions');
     const prompt = config.translatePrompt
       .replace('{target}', config.targetLanguage)
       .replace('{text}', text);
@@ -40,14 +45,23 @@ class TranslateAPI {
     } catch (error) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
-        return { success: false, originalText: text, translatedText: '', error: '请求超时' };
+        return { success: false, originalText: text, translatedText: '', error: '请求超时，请检查翻译服务是否正常运行' };
       }
-      return { success: false, originalText: text, translatedText: '', error: error.message };
+      const errMsg = error.message || '';
+      if (errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError') || errMsg.includes('Network request failed')) {
+        return {
+          success: false,
+          originalText: text,
+          translatedText: '',
+          error: `无法连接翻译服务 (${url})，请确认：1) 服务已启动  2) 端口 ${config.translateApiPort} 正确  3) 在扩展设置中检查API地址`
+        };
+      }
+      return { success: false, originalText: text, translatedText: '', error: errMsg };
     }
   }
 
   static async ocrAndTranslate(imageDataUrl, config) {
-    const ocrUrl = `${config.ocrApiHost}:${config.ocrApiPort}/v1/chat/completions`;
+    const ocrUrl = this._buildUrl(config.ocrApiHost, config.ocrApiPort, '/v1/chat/completions');
 
     const ocrBody = {
       model: config.ocrModel,
@@ -102,14 +116,23 @@ class TranslateAPI {
     } catch (error) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
-        return { success: false, originalText: '', translatedText: '', error: 'OCR请求超时' };
+        return { success: false, originalText: '', translatedText: '', error: 'OCR请求超时，请检查OCR服务是否正常运行' };
       }
-      return { success: false, originalText: '', translatedText: '', error: error.message };
+      const errMsg = error.message || '';
+      if (errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError') || errMsg.includes('Network request failed')) {
+        return {
+          success: false,
+          originalText: '',
+          translatedText: '',
+          error: `无法连接OCR服务 (${ocrUrl})，请确认：1) 服务已启动  2) 端口 ${config.ocrApiPort} 正确  3) 在扩展设置中检查API地址`
+        };
+      }
+      return { success: false, originalText: '', translatedText: '', error: errMsg };
     }
   }
 
   static async summarize(text, config) {
-    const url = `${config.translateApiHost}:${config.translateApiPort}/v1/chat/completions`;
+    const url = this._buildUrl(config.translateApiHost, config.translateApiPort, '/v1/chat/completions');
     const prompt = config.summarizePrompt
       .replace('{target}', config.targetLanguage)
       .replace('{text}', text);
@@ -149,9 +172,17 @@ class TranslateAPI {
     } catch (error) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
-        return { success: false, summary: '', error: '请求超时' };
+        return { success: false, summary: '', error: '请求超时，请检查翻译服务是否正常运行' };
       }
-      return { success: false, summary: '', error: error.message };
+      const errMsg = error.message || '';
+      if (errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError') || errMsg.includes('Network request failed')) {
+        return {
+          success: false,
+          summary: '',
+          error: `无法连接翻译服务 (${url})，请确认服务已启动且端口正确`
+        };
+      }
+      return { success: false, summary: '', error: errMsg };
     }
   }
 
@@ -162,22 +193,28 @@ class TranslateAPI {
     };
 
     try {
-      const translateUrl = `${config.translateApiHost}:${config.translateApiPort}/v1/models`;
+      const translateUrl = this._buildUrl(config.translateApiHost, config.translateApiPort, '/v1/models');
+      const controller1 = new AbortController();
+      const tid1 = setTimeout(() => controller1.abort(), 5000);
       const translateResp = await fetch(translateUrl, {
         method: 'GET',
-        signal: AbortSignal.timeout(5000)
+        signal: controller1.signal
       });
+      clearTimeout(tid1);
       results.translate = translateResp.ok;
     } catch (e) {
       results.translate = false;
     }
 
     try {
-      const ocrUrl = `${config.ocrApiHost}:${config.ocrApiPort}/v1/models`;
+      const ocrUrl = this._buildUrl(config.ocrApiHost, config.ocrApiPort, '/v1/models');
+      const controller2 = new AbortController();
+      const tid2 = setTimeout(() => controller2.abort(), 5000);
       const ocrResp = await fetch(ocrUrl, {
         method: 'GET',
-        signal: AbortSignal.timeout(5000)
+        signal: controller2.signal
       });
+      clearTimeout(tid2);
       results.ocr = ocrResp.ok;
     } catch (e) {
       results.ocr = false;
