@@ -208,6 +208,7 @@ class ImageTranslator {
     }
 
     document.body.appendChild(popup);
+    this._makePopupDraggable(popup);
 
     popup.querySelector('[data-action="copy"]').addEventListener('click', () => {
       navigator.clipboard.writeText(result.translatedText).then(() => {
@@ -249,6 +250,59 @@ class ImageTranslator {
       chrome.runtime.sendMessage({ type: 'ocr-translate', imageDataUrl }, (response) => {
         resolve(response || { success: false, error: '无法连接到OCR服务' });
       });
+    });
+  }
+
+  _makePopupDraggable(popup) {
+    const header = popup.querySelector('.dt-popup-header');
+    if (!header) return;
+
+    let startX = 0;
+    let startY = 0;
+    let initialLeft = 0;
+    let initialTop = 0;
+    let isDragging = false;
+
+    const onMouseMove = (event) => {
+      if (!isDragging) return;
+
+      const nextLeft = initialLeft + (event.clientX - startX);
+      const nextTop = initialTop + (event.clientY - startY);
+
+      popup.style.left = `${Math.max(8, nextLeft)}px`;
+      popup.style.top = `${Math.max(8, nextTop)}px`;
+      popup.style.transform = 'none';
+    };
+
+    const onMouseUp = () => {
+      if (!isDragging) return;
+      isDragging = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.classList.remove('dt-dragging');
+    };
+
+    header.addEventListener('mousedown', (event) => {
+      if (event.target.closest('.dt-popup-actions')) {
+        return;
+      }
+
+      isDragging = true;
+      startX = event.clientX;
+      startY = event.clientY;
+
+      const rect = popup.getBoundingClientRect();
+      initialLeft = rect.left + window.scrollX;
+      initialTop = rect.top + window.scrollY;
+
+      popup.style.left = `${initialLeft}px`;
+      popup.style.top = `${initialTop}px`;
+      popup.style.transform = 'none';
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+      document.body.classList.add('dt-dragging');
+      event.preventDefault();
     });
   }
 

@@ -21,6 +21,8 @@
   padding: 10px 14px;
   background: linear-gradient(135deg, #4A90D9, #357ABD);
   color: #fff;
+  cursor: move;
+  user-select: none;
 }
 
 .dt-popup-title {
@@ -88,6 +90,10 @@
 .dt-btn-icon {
   font-size: 14px;
   padding: 2px 6px;
+}
+
+.dt-dragging {
+  user-select: none;
 }
 
 .dt-loading {
