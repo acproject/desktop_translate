@@ -183,7 +183,7 @@ class TextTranslator {
     }
   }
 
-  _showResultPopup(rect, originalText, translatedText) {
+  _showResultPopup(_rect, originalText, translatedText) {
     const existing = document.getElementById('dt-result-popup');
     if (existing) existing.remove();
 
@@ -205,19 +205,11 @@ class TextTranslator {
       </div>
     `;
 
-    const scrollX = window.scrollX;
-    const scrollY = window.scrollY;
-    let left = rect.left + scrollX + rect.width / 2 - 180;
-    let top = rect.bottom + scrollY + 8;
-
-    if (left < 10) left = 10;
-    if (left + 360 > window.innerWidth + scrollX) left = window.innerWidth + scrollX - 370;
-    if (top + 200 > window.innerHeight + scrollY) {
-      top = rect.top + scrollY - 208;
-    }
-
-    popup.style.left = left + 'px';
-    popup.style.top = top + 'px';
+    const centerLeft = window.scrollX + (window.innerWidth / 2);
+    const centerTop = window.scrollY + (window.innerHeight / 2);
+    popup.style.left = `${centerLeft}px`;
+    popup.style.top = `${centerTop}px`;
+    popup.style.transform = 'translate(-50%, -50%)';
 
     document.body.appendChild(popup);
 

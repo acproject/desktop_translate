@@ -167,7 +167,7 @@ class ImageTranslator {
     if (loading) loading.remove();
   }
 
-  _showImageResultPopup(rect, result) {
+  _showImageResultPopup(_rect, result) {
     const existing = document.getElementById('dt-image-result');
     if (existing) existing.remove();
 
@@ -191,21 +191,11 @@ class ImageTranslator {
       </div>
     `;
 
-    if (rect) {
-      let left = rect.left + window.scrollX + rect.width / 2 - 180;
-      let top = rect.bottom + window.scrollY + 8;
-      if (left < 10) left = 10;
-      if (left + 360 > window.innerWidth + window.scrollX) left = window.innerWidth + window.scrollX - 370;
-      if (top + 250 > window.innerHeight + window.scrollY) {
-        top = rect.top + window.scrollY - 258;
-      }
-      popup.style.left = left + 'px';
-      popup.style.top = top + 'px';
-    } else {
-      popup.style.left = '50%';
-      popup.style.top = '50%';
-      popup.style.transform = 'translate(-50%, -50%)';
-    }
+    const centerLeft = window.scrollX + (window.innerWidth / 2);
+    const centerTop = window.scrollY + (window.innerHeight / 2);
+    popup.style.left = `${centerLeft}px`;
+    popup.style.top = `${centerTop}px`;
+    popup.style.transform = 'translate(-50%, -50%)';
 
     document.body.appendChild(popup);
     this._makePopupDraggable(popup);

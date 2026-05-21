@@ -328,8 +328,8 @@ class GestureHandler {
       </div>
     `;
 
-    popup.style.left = '50%';
-    popup.style.top = '50%';
+    popup.style.left = `${window.scrollX + (window.innerWidth / 2)}px`;
+    popup.style.top = `${window.scrollY + (window.innerHeight / 2)}px`;
     popup.style.transform = 'translate(-50%, -50%)';
 
     document.body.appendChild(popup);
