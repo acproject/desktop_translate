@@ -12,6 +12,8 @@ const DEFAULT_CONFIG = {
   apiTimeout: 180,
   enableTextTranslate: true,
   enableImageTranslate: true,
+  enableVideoSubtitleTranslate: true,
+  showBilingualSubtitles: true,
   enableGesture: true,
   enableContextMenu: true,
   gestureButton: 'right',

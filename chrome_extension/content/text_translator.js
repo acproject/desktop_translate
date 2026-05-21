@@ -4,6 +4,32 @@ class TextTranslator {
     this.originalTexts = new WeakMap();
     this.originalPageTexts = new WeakMap();
     this.pageTranslationCache = new Map();
+    this.subtitleObserver = null;
+    this.subtitleScanTimer = null;
+    this.subtitleTranslationCache = new Map();
+    this.pendingSubtitleTranslations = new Map();
+    this.subtitleConfig = {
+      enableVideoSubtitleTranslate: true,
+      showBilingualSubtitles: true
+    };
+    this.hasSubtitleStorageListener = false;
+  }
+
+  async init() {
+    const config = await this._getConfig();
+    this._applySubtitleConfig(config);
+
+    if (!this.hasSubtitleStorageListener && chrome?.storage?.onChanged) {
+      chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName !== 'local' || !changes.config) {
+          return;
+        }
+
+        const nextConfig = { ...DEFAULT_CONFIG, ...(changes.config.newValue || {}) };
+        this._applySubtitleConfig(nextConfig);
+      });
+      this.hasSubtitleStorageListener = true;
+    }
   }
 
   async translateSelection() {
@@ -323,6 +349,274 @@ class TextTranslator {
     return new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: 'translate', text }, (response) => {
         resolve(response || { success: false, error: '无法连接到翻译服务' });
+      });
+    });
+  }
+
+  _initSubtitleTranslation() {
+    if (!this._isSupportedSubtitleHost() || this.subtitleObserver) {
+      return;
+    }
+
+    this.subtitleObserver = new MutationObserver(() => {
+      this._scheduleSubtitleScan();
+    });
+
+    this.subtitleObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+
+    this._scheduleSubtitleScan();
+  }
+
+  _scheduleSubtitleScan() {
+    if (this.subtitleScanTimer) {
+      clearTimeout(this.subtitleScanTimer);
+    }
+
+    this.subtitleScanTimer = setTimeout(() => {
+      this.subtitleScanTimer = null;
+      this._scanAndTranslateSubtitles();
+    }, 120);
+  }
+
+  async _scanAndTranslateSubtitles() {
+    if (!this.subtitleConfig.enableVideoSubtitleTranslate) {
+      this._restoreTranslatedSubtitles();
+      return;
+    }
+
+    const provider = this._getActiveSubtitleProvider();
+    if (!provider) {
+      this._restoreTranslatedSubtitles();
+      return;
+    }
+
+    const subtitleElements = this._collectSubtitleElements(provider);
+    for (const element of subtitleElements) {
+      await this._translateSubtitleElement(element);
+    }
+  }
+
+  _collectSubtitleElements(provider) {
+    for (const selector of provider.selectors) {
+      const elements = Array.from(document.querySelectorAll(selector))
+        .filter((element) => this._isVisibleSubtitleElement(element));
+      if (elements.length > 0) {
+        return elements;
+      }
+    }
+
+    return [];
+  }
+
+  _isVisibleSubtitleElement(element) {
+    if (!element || !element.isConnected) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  async _translateSubtitleElement(element) {
+    const originalText = this._getSubtitleSourceText(element);
+    if (!originalText) {
+      return;
+    }
+
+    const desiredMode = this.subtitleConfig.showBilingualSubtitles ? 'bilingual' : 'translated';
+    if (
+      element.dataset.dtSubtitleOriginalText === originalText &&
+      element.dataset.dtSubtitleTranslatedText &&
+      element.dataset.dtSubtitleRenderMode === desiredMode
+    ) {
+      return;
+    }
+
+    const cachedTranslation = this.subtitleTranslationCache.get(originalText);
+    if (cachedTranslation) {
+      this._applySubtitleTranslation(element, originalText, cachedTranslation);
+      return;
+    }
+
+    let pendingRequest = this.pendingSubtitleTranslations.get(originalText);
+    if (!pendingRequest) {
+      pendingRequest = this._sendTranslateRequest(originalText)
+        .finally(() => this.pendingSubtitleTranslations.delete(originalText));
+      this.pendingSubtitleTranslations.set(originalText, pendingRequest);
+    }
+
+    const result = await pendingRequest;
+    if (result?.success && result.translatedText?.trim()) {
+      const translatedText = this._normalizeSubtitleText(result.translatedText);
+      this.subtitleTranslationCache.set(originalText, translatedText);
+      this._applySubtitleTranslation(element, originalText, translatedText);
+    }
+  }
+
+  _applySubtitleTranslation(element, originalText, translatedText) {
+    if (!translatedText || !element.isConnected) {
+      return;
+    }
+
+    element.dataset.dtSubtitleOriginalText = originalText;
+    element.dataset.dtSubtitleTranslatedText = translatedText;
+    element.dataset.dtSubtitleRenderMode = this.subtitleConfig.showBilingualSubtitles ? 'bilingual' : 'translated';
+    element.classList.add('dt-subtitle-host');
+
+    if (this.subtitleConfig.showBilingualSubtitles) {
+      element.innerHTML = `
+        <span class="dt-subtitle-bilingual">
+          <span class="dt-subtitle-original">${this._escapeHtml(originalText)}</span>
+          <span class="dt-subtitle-translation">${this._escapeHtml(translatedText)}</span>
+        </span>
+      `;
+    } else {
+      element.textContent = translatedText;
+    }
+  }
+
+  _normalizeSubtitleText(text) {
+    return (text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  _getSubtitleSourceText(element) {
+    const currentText = this._normalizeSubtitleText(element.textContent || '');
+    const originalText = this._normalizeSubtitleText(element.dataset.dtSubtitleOriginalText || '');
+    const translatedText = this._normalizeSubtitleText(element.dataset.dtSubtitleTranslatedText || '');
+
+    if (!originalText) {
+      return currentText;
+    }
+
+    const bilingualRenderedText = this._normalizeSubtitleText(`${originalText} ${translatedText}`);
+    if (
+      currentText === originalText ||
+      currentText === translatedText ||
+      currentText === bilingualRenderedText ||
+      !!element.querySelector('.dt-subtitle-bilingual')
+    ) {
+      return originalText;
+    }
+
+    delete element.dataset.dtSubtitleOriginalText;
+    delete element.dataset.dtSubtitleTranslatedText;
+    delete element.dataset.dtSubtitleRenderMode;
+    element.classList.remove('dt-subtitle-host');
+    return currentText;
+  }
+
+  _applySubtitleConfig(config) {
+    this.subtitleConfig.enableVideoSubtitleTranslate = config.enableVideoSubtitleTranslate !== false;
+    this.subtitleConfig.showBilingualSubtitles = config.showBilingualSubtitles !== false;
+
+    if (!this._isSupportedSubtitleHost()) {
+      return;
+    }
+
+    if (this.subtitleConfig.enableVideoSubtitleTranslate) {
+      this._initSubtitleTranslation();
+      this._scheduleSubtitleScan();
+    } else {
+      this._teardownSubtitleTranslation();
+      this._restoreTranslatedSubtitles();
+    }
+  }
+
+  _teardownSubtitleTranslation() {
+    if (this.subtitleObserver) {
+      this.subtitleObserver.disconnect();
+      this.subtitleObserver = null;
+    }
+
+    if (this.subtitleScanTimer) {
+      clearTimeout(this.subtitleScanTimer);
+      this.subtitleScanTimer = null;
+    }
+  }
+
+  _restoreTranslatedSubtitles() {
+    document.querySelectorAll('[data-dt-subtitle-original-text]').forEach((element) => {
+      const originalText = element.dataset.dtSubtitleOriginalText || '';
+      if (originalText) {
+        element.textContent = originalText;
+      }
+
+      delete element.dataset.dtSubtitleOriginalText;
+      delete element.dataset.dtSubtitleTranslatedText;
+      delete element.dataset.dtSubtitleRenderMode;
+      element.classList.remove('dt-subtitle-host');
+    });
+  }
+
+  _getActiveSubtitleProvider() {
+    if (this._isYouTubeVideoPage()) {
+      return {
+        name: 'youtube',
+        selectors: [
+          '.ytp-caption-window-container .caption-visual-line',
+          '.ytp-caption-window-container .ytp-caption-segment'
+        ]
+      };
+    }
+
+    if (this._isBilibiliVideoPage()) {
+      return {
+        name: 'bilibili',
+        selectors: [
+          '.bpx-player-subtitle-panel-text',
+          '.bilibili-player-video-subtitle-content .bilibili-player-video-subtitle-item-text',
+          '.bilibili-player-video-subtitle-content .subtitle-item-text'
+        ]
+      };
+    }
+
+    return null;
+  }
+
+  _isSupportedSubtitleHost() {
+    return this._isYouTubeSite() || this._isBilibiliSite();
+  }
+
+  _isYouTubeSite() {
+    const host = window.location.hostname;
+    return host === 'www.youtube.com' || host === 'youtube.com' || host.endsWith('.youtube.com');
+  }
+
+  _isYouTubeVideoPage() {
+    if (!this._isYouTubeSite()) {
+      return false;
+    }
+
+    const path = window.location.pathname;
+    return path === '/watch' || path.startsWith('/shorts/') || path.startsWith('/live/');
+  }
+
+  _isBilibiliSite() {
+    const host = window.location.hostname;
+    return host === 'www.bilibili.com' || host === 'bilibili.com' || host.endsWith('.bilibili.com');
+  }
+
+  _isBilibiliVideoPage() {
+    if (!this._isBilibiliSite()) {
+      return false;
+    }
+
+    const path = window.location.pathname;
+    return path.startsWith('/video/') || path.startsWith('/bangumi/play/') || path.startsWith('/medialist/play/');
+  }
+
+  _getConfig() {
+    if (typeof Storage !== 'undefined' && typeof Storage.getConfig === 'function') {
+      return Storage.getConfig();
+    }
+
+    return new Promise((resolve) => {
+      chrome.storage.local.get('config', (result) => {
+        resolve({ ...DEFAULT_CONFIG, ...(result.config || {}) });
       });
     });
   }

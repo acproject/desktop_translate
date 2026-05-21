@@ -5,6 +5,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('target-lang').value = config.targetLanguage;
   document.getElementById('toggle-text-translate').checked = config.enableTextTranslate;
   document.getElementById('toggle-image-translate').checked = config.enableImageTranslate;
+  document.getElementById('toggle-video-subtitle-translate').checked = config.enableVideoSubtitleTranslate;
+  document.getElementById('toggle-bilingual-subtitles').checked = config.showBilingualSubtitles;
   document.getElementById('toggle-gesture').checked = config.enableGesture;
   document.getElementById('toggle-context-menu').checked = config.enableContextMenu;
 
@@ -49,6 +51,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('toggle-image-translate').addEventListener('change', async (e) => {
     const cfg = await Storage.getConfig();
     cfg.enableImageTranslate = e.target.checked;
+    await Storage.saveConfig(cfg);
+  });
+
+  document.getElementById('toggle-video-subtitle-translate').addEventListener('change', async (e) => {
+    const cfg = await Storage.getConfig();
+    cfg.enableVideoSubtitleTranslate = e.target.checked;
+    await Storage.saveConfig(cfg);
+  });
+
+  document.getElementById('toggle-bilingual-subtitles').addEventListener('change', async (e) => {
+    const cfg = await Storage.getConfig();
+    cfg.showBilingualSubtitles = e.target.checked;
     await Storage.saveConfig(cfg);
   });
 

@@ -32,6 +32,8 @@ function loadConfigToForm(config) {
 
   document.getElementById('opt-enable-text-translate').checked = config.enableTextTranslate;
   document.getElementById('opt-enable-image-translate').checked = config.enableImageTranslate;
+  document.getElementById('opt-enable-video-subtitle-translate').checked = config.enableVideoSubtitleTranslate;
+  document.getElementById('opt-show-bilingual-subtitles').checked = config.showBilingualSubtitles;
   document.getElementById('opt-enable-context-menu').checked = config.enableContextMenu;
 
   document.getElementById('translate-prompt').value = config.translatePrompt;
@@ -61,6 +63,8 @@ function getConfigFromForm() {
 
     enableTextTranslate: document.getElementById('opt-enable-text-translate').checked,
     enableImageTranslate: document.getElementById('opt-enable-image-translate').checked,
+    enableVideoSubtitleTranslate: document.getElementById('opt-enable-video-subtitle-translate').checked,
+    showBilingualSubtitles: document.getElementById('opt-show-bilingual-subtitles').checked,
     enableContextMenu: document.getElementById('opt-enable-context-menu').checked,
 
     translatePrompt: document.getElementById('translate-prompt').value,

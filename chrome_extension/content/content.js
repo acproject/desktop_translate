@@ -6,6 +6,7 @@
   window.imageTranslator = new ImageTranslator();
   window.gestureHandler = new GestureHandler();
 
+  window.textTranslator.init();
   window.imageTranslator.init();
   window.gestureHandler.init();
 
