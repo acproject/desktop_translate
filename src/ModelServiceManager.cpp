@@ -310,7 +310,7 @@ ModelServiceManager::ServiceSpec ModelServiceManager::translationServiceSpec() c
         {},
         {},
         config.getApiPort(),
-        4096
+        8192
     };
 }
 

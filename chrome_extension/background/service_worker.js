@@ -39,8 +39,6 @@ function createContextMenus() {
 }
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  const config = await Storage.getConfig();
-
   switch (info.menuItemId) {
     case 'translate-selection':
       chrome.tabs.sendMessage(tab.id, {
@@ -99,7 +97,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === 'summarize') {
-    handleSummarize(request.text).then(sendResponse);
+    handleSummarize(request.text, sender).then(sendResponse);
     return true;
   }
 
@@ -145,9 +143,11 @@ async function handleOcrTranslate(imageDataUrl) {
   return result;
 }
 
-async function handleSummarize(text) {
+async function handleSummarize(text, sender) {
   const config = await Storage.getConfig();
-  const result = await TranslateAPI.summarize(text, config);
+  const result = await TranslateAPI.summarize(text, config, (progress) => {
+    sendSummarizeProgress(sender, progress);
+  });
   if (result.success) {
     await Storage.addHistory({
       type: 'summarize',
@@ -156,6 +156,17 @@ async function handleSummarize(text) {
     });
   }
   return result;
+}
+
+function sendSummarizeProgress(sender, progress) {
+  if (!sender?.tab?.id) {
+    return;
+  }
+
+  chrome.tabs.sendMessage(sender.tab.id, {
+    type: 'summarize-progress',
+    ...progress
+  }).catch(() => {});
 }
 
 async function handleCheckApiStatus() {

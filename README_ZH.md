@@ -83,7 +83,7 @@ cmake --build . --config Release
 ```bash
 ./build_deb.sh
 # 或指定版本号
-./build_deb.sh 1.0.6
+./build_deb.sh 1.0.7
 ```
 
 生成的 deb 包位于 `dist/` 目录。

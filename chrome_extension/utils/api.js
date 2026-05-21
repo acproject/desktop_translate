@@ -131,46 +131,66 @@ class TranslateAPI {
     }
   }
 
-  static async summarize(text, config) {
+  static async summarize(text, config, onProgress = null) {
     const url = this._buildUrl(config.translateApiHost, config.translateApiPort, '/v1/chat/completions');
-    const prompt = config.summarizePrompt
-      .replace('{target}', config.targetLanguage)
-      .replace('{text}', text);
+    const preparedText = this._prepareSummaryText(text);
+    const chunks = this._splitSummaryText(preparedText, 2200);
 
-    const body = {
-      model: config.translateModel,
-      messages: [
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.5,
-      max_tokens: 2048
-    };
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), config.apiTimeout * 1000);
+    if (chunks.length === 0) {
+      return { success: false, summary: '', error: '没有可用于总结的页面内容' };
+    }
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(config.translateApiKey ? { 'Authorization': `Bearer ${config.translateApiKey}` } : {})
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal
+      this._emitProgress(onProgress, {
+        stage: 'split',
+        current: 0,
+        total: chunks.length,
+        message: chunks.length === 1
+          ? '正在总结页面内容...'
+          : `已拆分为 ${chunks.length} 段，准备开始分段总结...`
       });
 
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      if (chunks.length === 1) {
+        this._emitProgress(onProgress, {
+          stage: 'chunk',
+          current: 1,
+          total: 1,
+          message: '正在总结第 1/1 段...'
+        });
+        const prompt = this._buildChunkSummaryPrompt(chunks[0], config, 1, 1);
+        const summaryText = await this._requestChatText(url, config, prompt, 1024);
+        return { success: true, summary: summaryText };
       }
 
-      const data = await response.json();
-      const summaryText = this._extractMessageText(data);
-      return { success: true, summary: summaryText };
+      const partialSummaries = [];
+      for (let index = 0; index < chunks.length; index += 1) {
+        this._emitProgress(onProgress, {
+          stage: 'chunk',
+          current: index + 1,
+          total: chunks.length,
+          message: `正在总结第 ${index + 1}/${chunks.length} 段...`
+        });
+        const prompt = this._buildChunkSummaryPrompt(chunks[index], config, index + 1, chunks.length);
+        const partialSummary = await this._requestChatText(url, config, prompt, 768);
+        if (partialSummary.trim()) {
+          partialSummaries.push(`第${index + 1}段摘要：\n${partialSummary.trim()}`);
+        }
+      }
+
+      if (partialSummaries.length === 0) {
+        return { success: false, summary: '', error: '分段总结未返回有效结果' };
+      }
+
+      this._emitProgress(onProgress, {
+        stage: 'final',
+        current: partialSummaries.length,
+        total: chunks.length,
+        message: '正在生成最终摘要...'
+      });
+      const finalPrompt = this._buildFinalSummaryPrompt(partialSummaries, config);
+      const finalSummary = await this._requestChatText(url, config, finalPrompt, 1024);
+      return { success: true, summary: finalSummary };
     } catch (error) {
-      clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
         return { success: false, summary: '', error: '请求超时，请检查翻译服务是否正常运行' };
       }
@@ -247,6 +267,177 @@ class TranslateAPI {
 
   static _removeThinkBlocks(text) {
     return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  }
+
+  static _prepareSummaryText(text) {
+    return (text || '')
+      .replace(/\r/g, '\n')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+      .slice(0, 20000);
+  }
+
+  static _splitSummaryText(text, maxChunkLength) {
+    if (!text) {
+      return [];
+    }
+
+    const normalized = text.replace(/\n{3,}/g, '\n\n').trim();
+    if (!normalized) {
+      return [];
+    }
+
+    const paragraphs = normalized
+      .split(/\n{2,}/)
+      .map(paragraph => paragraph.trim())
+      .filter(Boolean);
+
+    const chunks = [];
+    let currentChunk = '';
+
+    for (const paragraph of paragraphs) {
+      if (paragraph.length > maxChunkLength) {
+        if (currentChunk) {
+          chunks.push(currentChunk);
+          currentChunk = '';
+        }
+
+        const sentences = paragraph.split(/(?<=[。！？.!?])\s+/);
+        let sentenceChunk = '';
+
+        for (const sentence of sentences) {
+          const trimmedSentence = sentence.trim();
+          if (!trimmedSentence) {
+            continue;
+          }
+
+          const candidate = sentenceChunk ? `${sentenceChunk} ${trimmedSentence}` : trimmedSentence;
+          if (candidate.length <= maxChunkLength) {
+            sentenceChunk = candidate;
+            continue;
+          }
+
+          if (sentenceChunk) {
+            chunks.push(sentenceChunk);
+          }
+
+          if (trimmedSentence.length <= maxChunkLength) {
+            sentenceChunk = trimmedSentence;
+            continue;
+          }
+
+          for (let offset = 0; offset < trimmedSentence.length; offset += maxChunkLength) {
+            chunks.push(trimmedSentence.slice(offset, offset + maxChunkLength));
+          }
+          sentenceChunk = '';
+        }
+
+        if (sentenceChunk) {
+          chunks.push(sentenceChunk);
+        }
+        continue;
+      }
+
+      const candidate = currentChunk ? `${currentChunk}\n\n${paragraph}` : paragraph;
+      if (candidate.length <= maxChunkLength) {
+        currentChunk = candidate;
+      } else {
+        if (currentChunk) {
+          chunks.push(currentChunk);
+        }
+        currentChunk = paragraph;
+      }
+    }
+
+    if (currentChunk) {
+      chunks.push(currentChunk);
+    }
+
+    return chunks;
+  }
+
+  static _buildChunkSummaryPrompt(chunkText, config, index, total) {
+    const basePrompt = config.summarizePrompt
+      .replace('{target}', config.targetLanguage)
+      .replace('{text}', chunkText);
+
+    if (total === 1) {
+      return basePrompt;
+    }
+
+    return `${basePrompt}\n\n补充要求：这是长网页的第 ${index}/${total} 段，请只总结当前片段的关键信息，避免猜测和重复。`;
+  }
+
+  static _buildFinalSummaryPrompt(partialSummaries, config) {
+    return [
+      `请使用${config.targetLanguage}整合以下同一网页的分段摘要，输出一份最终摘要。`,
+      '要求：',
+      '1. 去除重复信息',
+      '2. 保留核心观点、事实、结论和关键数据',
+      '3. 结构清晰，语言简洁',
+      '4. 不要提及“第几段摘要”之类的过程描述',
+      '',
+      partialSummaries.join('\n\n')
+    ].join('\n');
+  }
+
+  static async _requestChatText(url, config, prompt, maxTokens) {
+    const body = {
+      model: config.translateModel,
+      messages: [
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.5,
+      max_tokens: maxTokens
+    };
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), config.apiTimeout * 1000);
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(config.translateApiKey ? { 'Authorization': `Bearer ${config.translateApiKey}` } : {})
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorMessage = await this._readErrorMessage(response);
+        throw new Error(`HTTP ${response.status}: ${errorMessage || response.statusText}`);
+      }
+
+      const data = await response.json();
+      return this._extractMessageText(data).trim();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
+  }
+
+  static async _readErrorMessage(response) {
+    try {
+      const data = await response.json();
+      return data?.error?.message || data?.message || JSON.stringify(data);
+    } catch (e) {
+      try {
+        return await response.text();
+      } catch (ignored) {
+        return '';
+      }
+    }
+  }
+
+  static _emitProgress(onProgress, payload) {
+    if (typeof onProgress === 'function') {
+      onProgress(payload);
+    }
   }
 }
 

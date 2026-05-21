@@ -197,13 +197,15 @@ class GestureHandler {
   }
 
   _summarizePage() {
-    const bodyText = document.body.innerText;
-    if (!bodyText.trim()) return;
+    const pageText = window.textTranslator?.getPageTextForSummary?.() || this._collectSummarizableText();
+    if (!pageText) {
+      this._showGestureTooltip('页面没有可总结的内容', 'warning');
+      return;
+    }
 
-    const truncated = bodyText.substring(0, 8000);
-    this._showGestureLoading();
+    this._showGestureLoading('正在准备页面摘要...');
 
-    chrome.runtime.sendMessage({ type: 'summarize', text: truncated }, (response) => {
+    chrome.runtime.sendMessage({ type: 'summarize', text: pageText }, (response) => {
       this._hideGestureLoading();
       if (response && response.success) {
         this._showSummaryPopup(response.summary);
@@ -211,6 +213,55 @@ class GestureHandler {
         this._showGestureTooltip(response?.error || '总结失败', 'error');
       }
     });
+  }
+
+  _collectSummarizableText() {
+    const maxLength = 20000;
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: (node) => {
+          if (!node || !node.parentElement) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          const parent = node.parentElement;
+          const tagName = parent.tagName;
+          if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'OPTION'].includes(tagName)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          if (parent.closest('#dt-result-popup, #dt-page-result, #dt-page-loading, #dt-summary-popup, #dt-gesture-loading, .dt-popup, .dt-tooltip')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          const text = (node.nodeValue || '').replace(/\s+/g, ' ').trim();
+          if (text.length < 8) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+
+    const segments = [];
+    let totalLength = 0;
+    let node = walker.nextNode();
+
+    while (node && totalLength < maxLength) {
+      const text = node.nodeValue.replace(/\s+/g, ' ').trim();
+      if (text) {
+        const remaining = maxLength - totalLength;
+        const segment = text.slice(0, remaining);
+        segments.push(segment);
+        totalLength += segment.length + 1;
+      }
+      node = walker.nextNode();
+    }
+
+    return segments.join('\n').trim();
   }
 
   _translateHoveredImage() {
@@ -222,7 +273,7 @@ class GestureHandler {
     }
   }
 
-  _showGestureLoading() {
+  _showGestureLoading(message = '处理中...') {
     const existing = document.getElementById('dt-gesture-loading');
     if (existing) existing.remove();
 
@@ -235,9 +286,21 @@ class GestureHandler {
       left: 50%;
       transform: translate(-50%, -50%);
     `;
-    loading.innerHTML = '<div class="dt-spinner"></div><span>处理中...</span>';
+    loading.innerHTML = `<div class="dt-spinner"></div><span>${this._escapeHtml(message)}</span>`;
 
     document.body.appendChild(loading);
+  }
+
+  _updateSummaryProgress(message) {
+    this._updateGestureLoading(message || '处理中...');
+  }
+
+  _updateGestureLoading(message) {
+    const loading = document.getElementById('dt-gesture-loading');
+    const label = loading ? loading.querySelector('span') : null;
+    if (label) {
+      label.textContent = message;
+    }
   }
 
   _hideGestureLoading() {

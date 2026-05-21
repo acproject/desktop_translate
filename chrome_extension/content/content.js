@@ -9,7 +9,7 @@
   window.imageTranslator.init();
   window.gestureHandler.init();
 
-  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     switch (request.type) {
       case 'translate-text':
         window.textTranslator.translateSelection().then(() => sendResponse({ success: true }));
@@ -34,13 +34,20 @@
         sendResponse({ success: true });
         return false;
 
+      case 'summarize-progress':
+        if (window.gestureHandler) {
+          window.gestureHandler._updateSummaryProgress(request.message);
+        }
+        sendResponse({ success: true });
+        return false;
+
       case 'ping':
         sendResponse({ success: true, version: '1.0.0' });
         return false;
     }
   });
 
-  document.addEventListener('dblclick', async (e) => {
+  document.addEventListener('dblclick', async () => {
     const config = await new Promise((resolve) => {
       chrome.storage.local.get('config', (result) => {
         resolve({ ...DEFAULT_CONFIG, ...(result.config || {}) });

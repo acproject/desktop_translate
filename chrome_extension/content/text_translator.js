@@ -107,6 +107,44 @@ class TextTranslator {
     this.translatingElements.delete(element);
   }
 
+  getPageTextForSummary(maxLength = 20000) {
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: (node) => {
+          if (!this._isSummaryCandidateNode(node)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          const text = this._getTextNodeContentForSummary(node);
+          if (!text || text.length < 8) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+
+    const segments = [];
+    let totalLength = 0;
+    let node = walker.nextNode();
+
+    while (node && totalLength < maxLength) {
+      const text = this._getTextNodeContentForSummary(node);
+      if (text) {
+        const remaining = maxLength - totalLength;
+        const segment = text.slice(0, remaining);
+        segments.push(segment);
+        totalLength += segment.length + 1;
+      }
+      node = walker.nextNode();
+    }
+
+    return segments.join('\n').trim();
+  }
+
   restoreElement(element) {
     if (element.getAttribute('data-translated') === 'true') {
       const original = element.getAttribute('data-original');
@@ -335,6 +373,29 @@ class TextTranslator {
     }
 
     return nodes;
+  }
+
+  _getTextNodeContentForSummary(node) {
+    const sourceText = this.originalPageTexts.get(node) || node.nodeValue || '';
+    return sourceText.replace(/\s+/g, ' ').trim();
+  }
+
+  _isSummaryCandidateNode(node) {
+    if (!node || !node.parentElement) {
+      return false;
+    }
+
+    const parent = node.parentElement;
+    const tagName = parent.tagName;
+    if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'OPTION'].includes(tagName)) {
+      return false;
+    }
+
+    if (parent.closest('[contenteditable="true"], #dt-result-popup, #dt-page-result, #dt-page-loading, #dt-summary-popup, #dt-gesture-loading, .dt-popup, .dt-tooltip')) {
+      return false;
+    }
+
+    return true;
   }
 
   _escapeHtml(text) {
