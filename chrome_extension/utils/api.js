@@ -102,10 +102,17 @@ class TranslateAPI {
       const ocrData = await ocrResponse.json();
       const ocrText = this._extractMessageText(ocrData);
       const cleanedOcrText = this._removeThinkBlocks(ocrText);
-      const textBlocks = this._parseOcrTextBlocks(cleanedOcrText);
+      let textBlocks = this._parseOcrTextBlocks(cleanedOcrText);
 
       if (textBlocks.length === 0 && !cleanedOcrText.trim()) {
         return { success: false, originalText: '', translatedText: '', error: '未能识别到文字' };
+      }
+
+      if (textBlocks.length === 0 || textBlocks.every(block => !block.bbox)) {
+        const tiledBlocks = await this._ocrImageTiles(imageDataUrl, ocrUrl, config);
+        if (tiledBlocks.length > 0) {
+          textBlocks = tiledBlocks;
+        }
       }
 
       const blocksForTranslation = textBlocks.length > 0
@@ -146,10 +153,204 @@ class TranslateAPI {
       '',
       '输出要求：',
       '1. 只返回 JSON 数组，不要 Markdown，不要解释。',
-      '2. 每个元素格式为 {"text":"识别文字","bbox":[x,y,width,height]}。',
-      '3. bbox 必须使用原图像素坐标，x/y 为文字框左上角，width/height 为文字框大小。',
-      '4. 如果没有文字，返回 []。'
+      '2. 先定位图片中的文字块、段落、表格单元或气泡等区域，再识别每个区域内的文字。',
+      '3. 每个元素格式为 {"text":"识别文字","bbox":[x,y,width,height]}。',
+      '4. bbox 必须使用原图像素坐标，x/y 为文字框左上角，width/height 为文字框大小。',
+      '5. 按自然阅读顺序输出；如果没有文字，返回 []。'
     ].join('\n');
+  }
+
+  static async _ocrImageTiles(imageDataUrl, ocrUrl, config) {
+    try {
+      const image = await this._loadImageBitmap(imageDataUrl);
+      const tiles = this._buildImageTiles(image.width, image.height);
+      const blocks = [];
+
+      for (const tile of tiles) {
+        const tileDataUrl = await this._cropImageBitmapToDataUrl(image, tile);
+        const prompt = [
+          '这是从原图中裁剪出来的一个局部文字块。',
+          '请只识别这个局部图片内清晰可见的文字，按自然阅读顺序输出纯文本。',
+          '不要描述图片，不要输出 Markdown，不要解释。如果没有可读文字，返回空字符串。'
+        ].join('\n');
+        const blockText = this._cleanOcrPlainText(await this._requestOcrChatText(ocrUrl, config, prompt, tileDataUrl, 1024));
+        if (!blockText) {
+          continue;
+        }
+        if (blocks.some(block => this._isDuplicateOcrText(block.text, blockText))) {
+          continue;
+        }
+
+        blocks.push({
+          id: blocks.length + 1,
+          text: blockText,
+          bbox: {
+            x: tile.x,
+            y: tile.y,
+            width: tile.width,
+            height: tile.height
+          }
+        });
+      }
+
+      if (image.close) {
+        image.close();
+      }
+      return blocks;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  static _isDuplicateOcrText(existingText, nextText) {
+    const normalize = (value) => String(value || '').replace(/\s+/g, '').trim();
+    const a = normalize(existingText);
+    const b = normalize(nextText);
+    if (!a || !b) {
+      return false;
+    }
+
+    return a === b || (a.length >= 8 && b.length >= 8 && (a.includes(b) || b.includes(a)));
+  }
+
+  static _buildImageTiles(width, height) {
+    const minSize = 80;
+    if (width < minSize || height < minSize) {
+      return [{ x: 0, y: 0, width, height }];
+    }
+
+    const columns = width / height > 1.8 ? 2 : 1;
+    const targetTileHeight = 360;
+    const rows = Math.max(1, Math.min(8, Math.ceil(height / targetTileHeight)));
+    const overlap = Math.min(32, Math.floor(Math.min(width, height) * 0.06));
+    const tiles = [];
+
+    for (let row = 0; row < rows; row += 1) {
+      const rawY = Math.floor((height * row) / rows);
+      const rawY2 = Math.floor((height * (row + 1)) / rows);
+      const y = Math.max(0, rawY - (row > 0 ? overlap : 0));
+      const y2 = Math.min(height, rawY2 + (row < rows - 1 ? overlap : 0));
+
+      for (let column = 0; column < columns; column += 1) {
+        const rawX = Math.floor((width * column) / columns);
+        const rawX2 = Math.floor((width * (column + 1)) / columns);
+        const x = Math.max(0, rawX - (column > 0 ? overlap : 0));
+        const x2 = Math.min(width, rawX2 + (column < columns - 1 ? overlap : 0));
+
+        tiles.push({
+          x,
+          y,
+          width: Math.max(1, x2 - x),
+          height: Math.max(1, y2 - y)
+        });
+      }
+    }
+
+    return tiles;
+  }
+
+  static async _loadImageBitmap(imageDataUrl) {
+    if (typeof createImageBitmap !== 'function') {
+      throw new Error('createImageBitmap is unavailable');
+    }
+
+    const response = await fetch(imageDataUrl);
+    const blob = await response.blob();
+    return await createImageBitmap(blob);
+  }
+
+  static async _cropImageBitmapToDataUrl(image, tile) {
+    if (typeof OffscreenCanvas !== 'undefined') {
+      const canvas = new OffscreenCanvas(tile.width, tile.height);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(image, tile.x, tile.y, tile.width, tile.height, 0, 0, tile.width, tile.height);
+      const blob = await canvas.convertToBlob({ type: 'image/png' });
+      return await this._blobToDataUrl(blob);
+    }
+
+    if (typeof document !== 'undefined') {
+      const canvas = document.createElement('canvas');
+      canvas.width = tile.width;
+      canvas.height = tile.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(image, tile.x, tile.y, tile.width, tile.height, 0, 0, tile.width, tile.height);
+      return canvas.toDataURL('image/png');
+    }
+
+    throw new Error('Canvas is unavailable');
+  }
+
+  static async _blobToDataUrl(blob) {
+    if (typeof FileReader !== 'undefined') {
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    const buffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    }
+    return `data:${blob.type || 'image/png'};base64,${btoa(binary)}`;
+  }
+
+  static async _requestOcrChatText(url, config, prompt, imageDataUrl, maxTokens) {
+    const body = {
+      model: config.ocrModel,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: imageDataUrl } }
+          ]
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: maxTokens
+    };
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), config.apiTimeout * 1000);
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(config.ocrApiKey ? { 'Authorization': `Bearer ${config.ocrApiKey}` } : {})
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorMessage = await this._readErrorMessage(response);
+        throw new Error(`OCR HTTP ${response.status}: ${errorMessage || response.statusText}`);
+      }
+
+      const data = await response.json();
+      return this._extractMessageText(data).trim();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
+  }
+
+  static _cleanOcrPlainText(text) {
+    return this._removeThinkBlocks(String(text || ''))
+      .replace(/```(?:text)?/gi, '```')
+      .replace(/^```|```$/g, '')
+      .replace(/^(no text found|no readable text|none|null|无文字|没有文字|未识别到文字)$/i, '')
+      .trim();
   }
 
   static async _translateTextBlocks(blocks, config) {
