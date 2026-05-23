@@ -19,7 +19,7 @@ const DEFAULT_CONFIG = {
   gestureButton: 'right',
   gestureThreshold: 30,
   translatePrompt: '请将以下文本翻译为{target}，只返回翻译结果：\n\n{text}',
-  ocrPrompt: '请识别图片中的所有文字，只输出识别到的文字内容：',
+  ocrPrompt: '请识别图片中的所有文字及其位置，按 JSON 数组输出，每项包含 text 和 bbox。bbox 使用原图像素坐标，格式为 [x, y, width, height]。只输出 JSON，不要输出解释。',
   summarizePrompt: '请用{target}总结以下网页内容，提取关键信息：\n\n{text}'
 };
 

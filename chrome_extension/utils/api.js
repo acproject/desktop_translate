@@ -62,6 +62,7 @@ class TranslateAPI {
 
   static async ocrAndTranslate(imageDataUrl, config) {
     const ocrUrl = this._buildUrl(config.ocrApiHost, config.ocrApiPort, '/v1/chat/completions');
+    const ocrPrompt = this._buildStructuredOcrPrompt(config.ocrPrompt);
 
     const ocrBody = {
       model: config.ocrModel,
@@ -69,7 +70,7 @@ class TranslateAPI {
         {
           role: 'user',
           content: [
-            { type: 'text', text: config.ocrPrompt },
+            { type: 'text', text: ocrPrompt },
             { type: 'image_url', image_url: { url: imageDataUrl } }
           ]
         }
@@ -101,17 +102,25 @@ class TranslateAPI {
       const ocrData = await ocrResponse.json();
       const ocrText = this._extractMessageText(ocrData);
       const cleanedOcrText = this._removeThinkBlocks(ocrText);
+      const textBlocks = this._parseOcrTextBlocks(cleanedOcrText);
 
-      if (!cleanedOcrText.trim()) {
+      if (textBlocks.length === 0 && !cleanedOcrText.trim()) {
         return { success: false, originalText: '', translatedText: '', error: '未能识别到文字' };
       }
 
-      const translateResult = await this.translate(cleanedOcrText, config);
+      const blocksForTranslation = textBlocks.length > 0
+        ? textBlocks
+        : [{ id: 1, text: cleanedOcrText, bbox: null }];
+      const translatedBlocks = await this._translateTextBlocks(blocksForTranslation, config);
+      const originalText = blocksForTranslation.map(block => block.text).join('\n');
+      const translatedText = translatedBlocks.map(block => block.translatedText || '').filter(Boolean).join('\n');
+
       return {
-        success: translateResult.success,
-        originalText: cleanedOcrText,
-        translatedText: translateResult.translatedText,
-        error: translateResult.error
+        success: translatedBlocks.some(block => block.translatedText),
+        originalText,
+        translatedText,
+        textBlocks: translatedBlocks,
+        error: translatedBlocks.some(block => block.translatedText) ? undefined : '翻译结果为空'
       };
     } catch (error) {
       clearTimeout(timeoutId);
@@ -129,6 +138,185 @@ class TranslateAPI {
       }
       return { success: false, originalText: '', translatedText: '', error: errMsg };
     }
+  }
+
+  static _buildStructuredOcrPrompt(userPrompt) {
+    return [
+      userPrompt || '请识别图片中的所有文字及其位置。',
+      '',
+      '输出要求：',
+      '1. 只返回 JSON 数组，不要 Markdown，不要解释。',
+      '2. 每个元素格式为 {"text":"识别文字","bbox":[x,y,width,height]}。',
+      '3. bbox 必须使用原图像素坐标，x/y 为文字框左上角，width/height 为文字框大小。',
+      '4. 如果没有文字，返回 []。'
+    ].join('\n');
+  }
+
+  static async _translateTextBlocks(blocks, config) {
+    const nonEmptyBlocks = blocks.filter(block => block.text && block.text.trim());
+    if (nonEmptyBlocks.length === 0) {
+      return [];
+    }
+
+    const url = this._buildUrl(config.translateApiHost, config.translateApiPort, '/v1/chat/completions');
+    const items = nonEmptyBlocks.map((block, index) => ({
+      id: block.id ?? index + 1,
+      text: block.text
+    }));
+    const prompt = [
+      `请将以下 JSON 数组中每个 text 翻译为 ${config.targetLanguage}。`,
+      '只返回 JSON 数组，不要 Markdown，不要解释。每项格式为 {"id":原id,"translatedText":"译文"}。',
+      JSON.stringify(items)
+    ].join('\n\n');
+
+    try {
+      const responseText = await this._requestChatText(url, config, prompt, 4096);
+      const translatedItems = this._parseJsonPayload(responseText);
+      if (Array.isArray(translatedItems)) {
+        const translatedById = new Map();
+        translatedItems.forEach((item) => {
+          if (item && item.id !== undefined && item.translatedText !== undefined) {
+            translatedById.set(String(item.id), String(item.translatedText));
+          }
+        });
+
+        if (translatedById.size > 0) {
+          return nonEmptyBlocks.map(block => ({
+            ...block,
+            translatedText: translatedById.get(String(block.id)) || ''
+          }));
+        }
+      }
+    } catch (e) {
+      // Fall back to individual requests below; some local models are poor at JSON mode.
+    }
+
+    const translatedBlocks = [];
+    for (const block of nonEmptyBlocks) {
+      const result = await this.translate(block.text, config);
+      translatedBlocks.push({
+        ...block,
+        translatedText: result.success ? result.translatedText : ''
+      });
+    }
+    return translatedBlocks;
+  }
+
+  static _parseOcrTextBlocks(text) {
+    const payload = this._parseJsonPayload(text);
+    const items = Array.isArray(payload) ? payload : payload?.items || payload?.blocks || payload?.textBlocks || [];
+
+    if (!Array.isArray(items)) {
+      return [];
+    }
+
+    return items
+      .map((item, index) => this._normalizeOcrBlock(item, index))
+      .filter(block => block && block.text);
+  }
+
+  static _normalizeOcrBlock(item, index) {
+    if (!item || typeof item !== 'object') {
+      return null;
+    }
+
+    const text = String(item.text || item.content || item.value || item.words || '').trim();
+    if (!text) {
+      return null;
+    }
+
+    const bbox = this._normalizeBoundingBox(item.bbox || item.box || item.boundingBox || item.rect || item.position || item);
+    return {
+      id: item.id ?? index + 1,
+      text,
+      bbox
+    };
+  }
+
+  static _normalizeBoundingBox(box) {
+    if (Array.isArray(box)) {
+      if (box.length >= 4 && box.every(value => typeof value === 'number')) {
+        const [a, b, c, d] = box;
+        return { x: a, y: b, width: Math.max(1, c), height: Math.max(1, d) };
+      }
+
+      const points = box
+        .filter(point => Array.isArray(point) && point.length >= 2)
+        .map(point => ({ x: Number(point[0]), y: Number(point[1]) }))
+        .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
+      return this._boxFromPoints(points);
+    }
+
+    if (box && typeof box === 'object') {
+      if (Number.isFinite(Number(box.x)) && Number.isFinite(Number(box.y))) {
+        const x = Number(box.x);
+        const y = Number(box.y);
+        const width = Number(box.width ?? box.w ?? (box.x2 !== undefined ? Number(box.x2) - x : 0));
+        const height = Number(box.height ?? box.h ?? (box.y2 !== undefined ? Number(box.y2) - y : 0));
+        if (width > 0 && height > 0) {
+          return { x, y, width, height };
+        }
+      }
+
+      const points = box.points || box.vertices || box.polygon;
+      if (Array.isArray(points)) {
+        return this._boxFromPoints(points.map(point => ({
+          x: Number(point.x ?? point[0]),
+          y: Number(point.y ?? point[1])
+        })));
+      }
+    }
+
+    return null;
+  }
+
+  static _boxFromPoints(points) {
+    const validPoints = points.filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
+    if (validPoints.length === 0) {
+      return null;
+    }
+
+    const xs = validPoints.map(point => point.x);
+    const ys = validPoints.map(point => point.y);
+    const x = Math.min(...xs);
+    const y = Math.min(...ys);
+    const width = Math.max(...xs) - x;
+    const height = Math.max(...ys) - y;
+    if (width <= 0 || height <= 0) {
+      return null;
+    }
+
+    return { x, y, width, height };
+  }
+
+  static _parseJsonPayload(text) {
+    const cleanedText = this._removeThinkBlocks(String(text || ''))
+      .replace(/```(?:json)?/gi, '```')
+      .trim();
+    const candidates = [
+      cleanedText,
+      this._extractJsonCandidate(cleanedText, '[', ']'),
+      this._extractJsonCandidate(cleanedText, '{', '}')
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+      try {
+        return JSON.parse(candidate.replace(/^```|```$/g, '').trim());
+      } catch (e) {
+        // Try the next candidate.
+      }
+    }
+
+    return null;
+  }
+
+  static _extractJsonCandidate(text, startChar, endChar) {
+    const start = text.indexOf(startChar);
+    const end = text.lastIndexOf(endChar);
+    if (start === -1 || end === -1 || end <= start) {
+      return '';
+    }
+    return text.slice(start, end + 1);
   }
 
   static async summarize(text, config, onProgress = null) {

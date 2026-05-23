@@ -3,6 +3,7 @@ class ImageTranslator {
     this.overlay = null;
     this.hoveredImage = null;
     this.imageTranslateButton = null;
+    this.activeImageOverlays = new Map();
   }
 
   init() {
@@ -49,6 +50,12 @@ class ImageTranslator {
   }
 
   async translateImageBySrc(srcUrl) {
+    const imgElement = this._findImageBySrc(srcUrl);
+    if (imgElement) {
+      await this._translateImage(imgElement);
+      return;
+    }
+
     this._showImageLoading(null);
     try {
       const imageDataUrl = await this._imageUrlToBase64(srcUrl);
@@ -56,7 +63,7 @@ class ImageTranslator {
       this._hideImageLoading();
 
       if (result.success) {
-        this._showImageResultPopup(null, result);
+        this._showImageTooltip('未找到页面中的图片元素，无法按坐标覆盖显示', 'warning');
       } else {
         this._showImageTooltip(result.error || '图片翻译失败', 'error');
       }
@@ -77,7 +84,7 @@ class ImageTranslator {
       this._hideImageLoading();
 
       if (result.success) {
-        this._showImageResultPopup(rect, result);
+        this._showImageTranslationOverlay(imgElement, result);
       } else {
         this._showImageTooltip(result.error || '图片翻译失败', 'error');
       }
@@ -165,6 +172,223 @@ class ImageTranslator {
   _hideImageLoading() {
     const loading = document.getElementById('dt-image-loading');
     if (loading) loading.remove();
+  }
+
+  _showImageTranslationOverlay(imgElement, result) {
+    this._removeImageOverlay(imgElement);
+
+    const textBlocks = (Array.isArray(result.textBlocks) ? result.textBlocks : [])
+      .filter(block => block?.bbox && (block.translatedText || '').trim());
+
+    if (textBlocks.length === 0) {
+      this._showImageTooltip('OCR未返回文字坐标，无法直接覆盖到图片文字位置', 'warning');
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'dt-image-translation-overlay';
+    overlay.dataset.dtImageOverlay = 'true';
+
+    const textLayer = document.createElement('div');
+    textLayer.className = 'dt-image-translation-layer';
+    overlay.appendChild(textLayer);
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'dt-image-translation-toolbar';
+    toolbar.innerHTML = `
+      <button class="dt-image-overlay-action" data-action="copy" title="复制翻译">📋</button>
+      <button class="dt-image-overlay-action" data-action="close" title="关闭">✕</button>
+    `;
+    overlay.appendChild(toolbar);
+
+    document.body.appendChild(overlay);
+
+    const updatePosition = () => {
+      if (!document.body.contains(overlay) || !document.body.contains(imgElement)) {
+        this._removeImageOverlay(imgElement);
+        return;
+      }
+
+      const rect = imgElement.getBoundingClientRect();
+      overlay.style.left = `${rect.left + window.scrollX}px`;
+      overlay.style.top = `${rect.top + window.scrollY}px`;
+      overlay.style.width = `${rect.width}px`;
+      overlay.style.height = `${rect.height}px`;
+
+      this._renderImageTextBlocks(textLayer, textBlocks, imgElement, rect);
+    };
+
+    const scheduleUpdate = () => requestAnimationFrame(updatePosition);
+    const entry = { overlay, updatePosition: scheduleUpdate };
+    this.activeImageOverlays.set(imgElement, entry);
+
+    toolbar.querySelector('[data-action="copy"]').addEventListener('click', () => {
+      navigator.clipboard.writeText(result.translatedText || '').then(() => {
+        this._showImageTooltip('已复制到剪贴板', 'success');
+      });
+    });
+
+    toolbar.querySelector('[data-action="close"]').addEventListener('click', () => {
+      this._removeImageOverlay(imgElement);
+    });
+
+    window.addEventListener('scroll', scheduleUpdate, true);
+    window.addEventListener('resize', scheduleUpdate);
+    entry.cleanup = () => {
+      window.removeEventListener('scroll', scheduleUpdate, true);
+      window.removeEventListener('resize', scheduleUpdate);
+    };
+
+    updatePosition();
+  }
+
+  _renderImageTextBlocks(textLayer, textBlocks, imgElement, rect) {
+    textLayer.replaceChildren();
+
+    const naturalWidth = imgElement.naturalWidth || rect.width;
+    const naturalHeight = imgElement.naturalHeight || rect.height;
+    const scaleX = rect.width / naturalWidth;
+    const scaleY = rect.height / naturalHeight;
+
+    textBlocks.forEach((block) => {
+      const translatedText = (block.translatedText || '').trim();
+      if (!translatedText) return;
+
+      const blockEl = document.createElement('div');
+      blockEl.className = 'dt-image-translated-block';
+      blockEl.textContent = translatedText;
+      blockEl.title = block.text || '';
+
+      const left = Math.max(0, block.bbox.x * scaleX);
+      const top = Math.max(0, block.bbox.y * scaleY);
+      if (left >= rect.width || top >= rect.height) return;
+
+      const width = Math.max(12, Math.min(block.bbox.width * scaleX, rect.width - left));
+      const height = Math.max(10, Math.min(block.bbox.height * scaleY, rect.height - top));
+      const textStyle = this._fitTextStyle(translatedText, width, height);
+
+      blockEl.style.left = `${left}px`;
+      blockEl.style.top = `${top}px`;
+      blockEl.style.width = `${width}px`;
+      blockEl.style.height = `${height}px`;
+      blockEl.style.fontSize = `${textStyle.fontSize}px`;
+      blockEl.style.lineHeight = String(textStyle.lineHeight);
+
+      textLayer.appendChild(blockEl);
+    });
+  }
+
+  _fitTextStyle(text, width, height) {
+    const paddingX = width >= 28 ? 8 : 4;
+    const paddingY = height >= 18 ? 4 : 2;
+    const availableWidth = Math.max(4, width - paddingX);
+    const availableHeight = Math.max(4, height - paddingY);
+    const lineHeight = 1.12;
+    const maxFontSize = Math.max(8, Math.min(34, Math.floor(availableHeight * 0.95), Math.floor(width * 0.45)));
+    const minFontSize = 6;
+
+    for (let fontSize = maxFontSize; fontSize >= minFontSize; fontSize -= 1) {
+      const metrics = this._measureWrappedText(text, fontSize, availableWidth, lineHeight);
+      if (metrics.width <= availableWidth && metrics.height <= availableHeight) {
+        return { fontSize, lineHeight };
+      }
+    }
+
+    return { fontSize: minFontSize, lineHeight };
+  }
+
+  _measureWrappedText(text, fontSize, maxWidth, lineHeight) {
+    if (!this.measureCanvas) {
+      this.measureCanvas = document.createElement('canvas');
+    }
+
+    const ctx = this.measureCanvas.getContext('2d');
+    ctx.font = `650 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif`;
+
+    const lines = this._wrapTextForWidth(ctx, text, maxWidth);
+    const widestLine = lines.reduce((maxWidthSoFar, line) => {
+      return Math.max(maxWidthSoFar, ctx.measureText(line).width);
+    }, 0);
+
+    return {
+      width: widestLine,
+      height: lines.length * fontSize * lineHeight
+    };
+  }
+
+  _wrapTextForWidth(ctx, text, maxWidth) {
+    const tokens = this._tokenizeTextForWrap(text);
+    const lines = [];
+    let currentLine = '';
+
+    tokens.forEach((token) => {
+      const candidate = currentLine ? `${currentLine}${token}` : token.trimStart();
+      if (candidate && ctx.measureText(candidate).width <= maxWidth) {
+        currentLine = candidate;
+        return;
+      }
+
+      if (currentLine) {
+        lines.push(currentLine);
+        currentLine = '';
+      }
+
+      if (ctx.measureText(token).width <= maxWidth) {
+        currentLine = token.trimStart();
+        return;
+      }
+
+      for (const char of token) {
+        const charCandidate = currentLine + char;
+        if (charCandidate && ctx.measureText(charCandidate).width <= maxWidth) {
+          currentLine = charCandidate;
+        } else {
+          if (currentLine) {
+            lines.push(currentLine);
+          }
+          currentLine = char;
+        }
+      }
+    });
+
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+
+    return lines.length > 0 ? lines : [''];
+  }
+
+  _tokenizeTextForWrap(text) {
+    const normalizedText = String(text || '').replace(/\s+/g, ' ').trim();
+    return normalizedText.match(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]|[^\s\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]+|\s+/g) || [];
+  }
+
+  _removeImageOverlay(imgElement) {
+    const entry = this.activeImageOverlays.get(imgElement);
+    if (!entry) return;
+
+    if (entry.cleanup) {
+      entry.cleanup();
+    }
+    entry.overlay.remove();
+    this.activeImageOverlays.delete(imgElement);
+  }
+
+  _findImageBySrc(srcUrl) {
+    if (!srcUrl) return null;
+
+    const normalize = (url) => {
+      try {
+        return new URL(url, window.location.href).href;
+      } catch (e) {
+        return url;
+      }
+    };
+
+    const targetUrl = normalize(srcUrl);
+    return Array.from(document.images).find((img) => {
+      return normalize(img.currentSrc || img.src) === targetUrl || normalize(img.src) === targetUrl;
+    }) || null;
   }
 
   _showImageResultPopup(_rect, result) {
