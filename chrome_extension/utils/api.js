@@ -204,7 +204,9 @@ class TranslateAPI {
 
   static _parseOcrTextBlocks(text) {
     const payload = this._parseJsonPayload(text);
-    const items = Array.isArray(payload) ? payload : payload?.items || payload?.blocks || payload?.textBlocks || [];
+    const items = Array.isArray(payload)
+      ? (this._looksLikeOcrArrayBlock(payload) ? [payload] : payload)
+      : payload?.items || payload?.blocks || payload?.textBlocks || payload?.result || payload?.data || payload?.ocr || [];
 
     if (!Array.isArray(items)) {
       return [];
@@ -216,16 +218,25 @@ class TranslateAPI {
   }
 
   static _normalizeOcrBlock(item, index) {
+    if (Array.isArray(item)) {
+      return this._normalizeOcrArrayBlock(item, index);
+    }
+
     if (!item || typeof item !== 'object') {
       return null;
     }
 
-    const text = String(item.text || item.content || item.value || item.words || '').trim();
+    const textValue = item.text || item.content || item.value || item.words || item.rec_text || item.label || item.description || '';
+    const text = String(textValue).trim();
     if (!text) {
       return null;
     }
 
-    const bbox = this._normalizeBoundingBox(item.bbox || item.box || item.boundingBox || item.rect || item.position || item);
+    const bbox = this._normalizeBoundingBox(
+      item.bbox || item.box || item.boundingBox || item.bounding_box || item.rect || item.position ||
+      item.coordinate || item.coordinates || item.coords || item.points || item.vertices || item.polygon ||
+      item.poly || item.quad || item.dt_poly || item.dt_polys || item
+    );
     return {
       id: item.id ?? index + 1,
       text,
@@ -233,10 +244,31 @@ class TranslateAPI {
     };
   }
 
+  static _normalizeOcrArrayBlock(item, index) {
+    const textIndex = item.findIndex(value => typeof value === 'string' && value.trim());
+    const boxIndex = item.findIndex(value => value !== item[textIndex] && (Array.isArray(value) || (value && typeof value === 'object')));
+    const text = textIndex >= 0 ? String(item[textIndex]).trim() : '';
+    if (!text) {
+      return null;
+    }
+
+    return {
+      id: index + 1,
+      text,
+      bbox: boxIndex >= 0 ? this._normalizeBoundingBox(item[boxIndex]) : null
+    };
+  }
+
+  static _looksLikeOcrArrayBlock(item) {
+    return item.some(value => typeof value === 'string' && value.trim()) &&
+      item.some(value => Array.isArray(value) || (value && typeof value === 'object'));
+  }
+
   static _normalizeBoundingBox(box) {
     if (Array.isArray(box)) {
-      if (box.length >= 4 && box.every(value => typeof value === 'number')) {
-        const [a, b, c, d] = box;
+      const numericValues = box.map(value => Number(value));
+      if (box.length >= 4 && numericValues.every(value => Number.isFinite(value))) {
+        const [a, b, c, d] = numericValues;
         return { x: a, y: b, width: Math.max(1, c), height: Math.max(1, d) };
       }
 

@@ -177,12 +177,18 @@ class ImageTranslator {
   _showImageTranslationOverlay(imgElement, result) {
     this._removeImageOverlay(imgElement);
 
-    const textBlocks = (Array.isArray(result.textBlocks) ? result.textBlocks : [])
-      .filter(block => block?.bbox && (block.translatedText || '').trim());
+    const candidateBlocks = (Array.isArray(result.textBlocks) ? result.textBlocks : [])
+      .filter(block => (block?.translatedText || '').trim());
+    let textBlocks = candidateBlocks.filter(block => block?.bbox);
 
     if (textBlocks.length === 0) {
-      this._showImageTooltip('OCR未返回文字坐标，无法直接覆盖到图片文字位置', 'warning');
-      return;
+      textBlocks = this._buildFallbackImageTextBlocks(candidateBlocks, result, imgElement);
+      if (textBlocks.length === 0) {
+        this._showImageResultPopup(imgElement.getBoundingClientRect(), result);
+        this._showImageTooltip('OCR未返回文字坐标，已显示为文本结果', 'warning');
+        return;
+      }
+      this._showImageTooltip('OCR未返回文字坐标，已按文本行估算覆盖位置', 'warning');
     }
 
     const overlay = document.createElement('div');
@@ -240,6 +246,62 @@ class ImageTranslator {
     };
 
     updatePosition();
+  }
+
+  _buildFallbackImageTextBlocks(blocks, result, imgElement) {
+    const naturalWidth = Math.max(1, imgElement.naturalWidth || imgElement.width || imgElement.getBoundingClientRect().width);
+    const naturalHeight = Math.max(1, imgElement.naturalHeight || imgElement.height || imgElement.getBoundingClientRect().height);
+    const sourceBlocks = blocks.length > 0 ? blocks : this._blocksFromPlainImageText(result);
+    const lines = sourceBlocks
+      .flatMap((block) => String(block.translatedText || '').split(/\n+/).map((line) => ({
+        text: block.text || '',
+        translatedText: line.trim()
+      })))
+      .filter(block => block.translatedText);
+
+    if (lines.length === 0) {
+      return [];
+    }
+
+    const sidePadding = Math.max(8, naturalWidth * 0.06);
+    const usableWidth = Math.max(24, naturalWidth - sidePadding * 2);
+    const topPadding = Math.max(8, naturalHeight * 0.08);
+    const bottomPadding = Math.max(8, naturalHeight * 0.08);
+    const usableHeight = Math.max(12, naturalHeight - topPadding - bottomPadding);
+    const rowGap = Math.max(4, Math.min(12, naturalHeight * 0.018));
+    const rowHeight = Math.max(18, Math.min(64, (usableHeight - rowGap * (lines.length - 1)) / lines.length));
+
+    return lines.map((block, index) => {
+      const y = Math.min(
+        naturalHeight - rowHeight - bottomPadding,
+        topPadding + index * (rowHeight + rowGap)
+      );
+
+      return {
+        ...block,
+        id: block.id ?? index + 1,
+        bbox: {
+          x: sidePadding,
+          y: Math.max(0, y),
+          width: usableWidth,
+          height: rowHeight
+        }
+      };
+    });
+  }
+
+  _blocksFromPlainImageText(result) {
+    const translatedText = String(result?.translatedText || '').trim();
+    if (!translatedText) {
+      return [];
+    }
+
+    const originalLines = String(result?.originalText || '').split(/\n+/).map(line => line.trim()).filter(Boolean);
+    return translatedText.split(/\n+/).map((line, index) => ({
+      id: index + 1,
+      text: originalLines[index] || '',
+      translatedText: line.trim()
+    }));
   }
 
   _renderImageTextBlocks(textLayer, textBlocks, imgElement, rect) {
