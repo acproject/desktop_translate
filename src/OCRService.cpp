@@ -7,13 +7,73 @@
 #include <QScreen>
 #include <QGuiApplication>
 #include <QPixmap>
+#include <QPainter>
 #include <QStringList>
+#include <algorithm>
+#include <cmath>
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
 
 namespace DesktopTranslate {
 
 namespace {
+
+int clamp8(int value) {
+    if (value < 0) {
+        return 0;
+    }
+    if (value > 255) {
+        return 255;
+    }
+    return value;
+}
+
+QImage preprocessForOcr(const QImage& input) {
+    if (input.isNull()) {
+        return {};
+    }
+
+    QImage flattened(input.size(), QImage::Format_RGB32);
+    flattened.fill(Qt::white);
+    {
+        QPainter painter(&flattened);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        painter.drawImage(0, 0, input);
+    }
+
+    const int maxDim = std::max(flattened.width(), flattened.height());
+    int targetMaxDim = maxDim;
+    if (maxDim < 1400) {
+        targetMaxDim = 1400;
+    } else if (maxDim > 2200) {
+        targetMaxDim = 2200;
+    }
+
+    QImage scaled = flattened;
+    if (targetMaxDim != maxDim && maxDim > 0) {
+        const double ratio = static_cast<double>(targetMaxDim) / static_cast<double>(maxDim);
+        const int newW = std::max(1, static_cast<int>(std::lround(flattened.width() * ratio)));
+        const int newH = std::max(1, static_cast<int>(std::lround(flattened.height() * ratio)));
+        scaled = flattened.scaled(newW, newH, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
+
+    QImage contrast = scaled.convertToFormat(QImage::Format_RGB32);
+    constexpr double contrastFactor = 1.18;
+    for (int y = 0; y < contrast.height(); ++y) {
+        auto* line = reinterpret_cast<QRgb*>(contrast.scanLine(y));
+        for (int x = 0; x < contrast.width(); ++x) {
+            const int r = qRed(line[x]);
+            const int g = qGreen(line[x]);
+            const int b = qBlue(line[x]);
+            const int nr = clamp8(static_cast<int>(std::lround((r - 128) * contrastFactor + 128)));
+            const int ng = clamp8(static_cast<int>(std::lround((g - 128) * contrastFactor + 128)));
+            const int nb = clamp8(static_cast<int>(std::lround((b - 128) * contrastFactor + 128)));
+            line[x] = qRgb(nr, ng, nb);
+        }
+    }
+
+    return contrast;
+}
 
 QString removeThinkBlocks(QString text) {
     const QString openTag = "<think>";
@@ -159,9 +219,13 @@ OCRResult OCRService::recognizeText(const QImage& image) {
         result.error = "Invalid image";
         return result;
     }
-    
+
+    const QImage preparedImage = preprocessForOcr(image);
+    qDebug() << "OCR preprocess: original =" << image.width() << "x" << image.height()
+             << "prepared =" << preparedImage.width() << "x" << preparedImage.height();
+
     // 将图片转为base64
-    QString base64Image = imageToBase64(image);
+    QString base64Image = imageToBase64(preparedImage.isNull() ? image : preparedImage);
     
     // 构建请求体 - OpenAI Vision API格式
     nlohmann::json requestBody = {
@@ -172,7 +236,7 @@ OCRResult OCRService::recognizeText(const QImage& image) {
                 {"content", {
                     {
                         {"type", "text"},
-                        {"text", "Extract all visible text from this image in natural reading order. Output plain text only. Preserve meaningful paragraph breaks and list items. Do not describe the image, do not add explanations, and do not wrap the result in markdown or code fences. If there is no readable text, output 'No text found'."}
+                        {"text", "You are an OCR engine. Extract every visible text element from the image, including titles, labels, units, and small annotations. Keep the original language and casing. Output plain text only (no markdown, no code fences, no explanations). Use natural reading order (top-to-bottom, left-to-right). Put each distinct text block on its own line. Preserve meaningful line breaks and list items. If there is no readable text, output exactly: No text found"}
                     },
                     {
                         {"type", "image_url"},
@@ -183,7 +247,8 @@ OCRResult OCRService::recognizeText(const QImage& image) {
                 }}
             }
         }},
-        {"max_tokens", 4096}
+        {"max_tokens", 4096},
+        {"temperature", 0}
     };
     
     std::string body = requestBody.dump();
