@@ -34,13 +34,21 @@ public:
     int getSelectionOpacity() const;
     std::string getSelectionColor() const;
 
+    // 高级翻译器配置
+    bool getUseAdvancedModel() const;
+    bool getKeepAdvancedSetting() const;
+    void setUseAdvancedModel(bool use);
+    void setKeepAdvancedSetting(bool keep);
+
     // 快捷键配置
     std::string getShortcutSelectTranslate() const;
     std::string getShortcutClipboardTranslate() const;
     std::string getShortcutHoverTranslationToggle() const;
+    std::string getShortcutDictionary() const;
     void setShortcutSelectTranslate(const std::string& shortcut);
     void setShortcutClipboardTranslate(const std::string& shortcut);
     void setShortcutHoverTranslationToggle(const std::string& shortcut);
+    void setShortcutDictionary(const std::string& shortcut);
 
     // 设置方法
     void setApiEndpoint(const std::string& endpoint);
@@ -92,6 +100,11 @@ private:
     std::string shortcut_select_translate_{"Ctrl+F3"};
     std::string shortcut_clipboard_translate_{"Ctrl+F4"};
     std::string shortcut_hover_translation_toggle_{"Ctrl+F8"};
+    std::string shortcut_dictionary_{"Ctrl+F5"};
+
+    // 高级翻译器配置
+    bool use_advanced_model_{false};
+    bool keep_advanced_setting_{false};
 };
 
 } // namespace DesktopTranslate

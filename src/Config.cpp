@@ -141,6 +141,10 @@ std::string Config::getShortcutHoverTranslationToggle() const {
     return shortcut_hover_translation_toggle_;
 }
 
+std::string Config::getShortcutDictionary() const {
+    return shortcut_dictionary_;
+}
+
 void Config::setShortcutSelectTranslate(const std::string& shortcut) {
     shortcut_select_translate_ = shortcut;
 }
@@ -151,6 +155,26 @@ void Config::setShortcutClipboardTranslate(const std::string& shortcut) {
 
 void Config::setShortcutHoverTranslationToggle(const std::string& shortcut) {
     shortcut_hover_translation_toggle_ = shortcut;
+}
+
+void Config::setShortcutDictionary(const std::string& shortcut) {
+    shortcut_dictionary_ = shortcut;
+}
+
+bool Config::getUseAdvancedModel() const {
+    return use_advanced_model_;
+}
+
+bool Config::getKeepAdvancedSetting() const {
+    return keep_advanced_setting_;
+}
+
+void Config::setUseAdvancedModel(bool use) {
+    use_advanced_model_ = use;
+}
+
+void Config::setKeepAdvancedSetting(bool keep) {
+    keep_advanced_setting_ = keep;
 }
 
 bool Config::load() {
@@ -252,6 +276,15 @@ bool Config::load() {
         shortcut_hover_translation_toggle_ = getJsonValue("shortcut_hover_translation_toggle");
         if (shortcut_hover_translation_toggle_.empty()) shortcut_hover_translation_toggle_ = "Ctrl+F8";
 
+        shortcut_dictionary_ = getJsonValue("shortcut_dictionary");
+        if (shortcut_dictionary_.empty()) shortcut_dictionary_ = "Ctrl+F5";
+
+        // 高级翻译器配置
+        std::string advModel = getJsonValue("use_advanced_model");
+        use_advanced_model_ = (advModel == "true" || advModel == "1");
+        std::string keepAdv = getJsonValue("keep_advanced_setting");
+        keep_advanced_setting_ = (keepAdv == "true" || keepAdv == "1");
+
         // OCR 配置
         ocr_endpoint_ = getJsonValue("ocr_endpoint");
         if (ocr_endpoint_.empty()) ocr_endpoint_ = "http://127.0.0.1";
@@ -303,6 +336,9 @@ bool Config::save() {
         file << "  \"shortcut_select_translate\": \"" << shortcut_select_translate_ << "\",\n";
         file << "  \"shortcut_clipboard_translate\": \"" << shortcut_clipboard_translate_ << "\",\n";
         file << "  \"shortcut_hover_translation_toggle\": \"" << shortcut_hover_translation_toggle_ << "\",\n";
+        file << "  \"shortcut_dictionary\": \"" << shortcut_dictionary_ << "\",\n";
+        file << "  \"use_advanced_model\": " << (use_advanced_model_ ? "true" : "false") << ",\n";
+        file << "  \"keep_advanced_setting\": " << (keep_advanced_setting_ ? "true" : "false") << ",\n";
         file << "  \"ocr_endpoint\": \"" << ocr_endpoint_ << "\",\n";
         file << "  \"ocr_port\": " << ocr_port_ << ",\n";
         file << "  \"ocr_api_key\": \"" << ocr_api_key_ << "\",\n";

@@ -7,6 +7,7 @@ build-*
 third_party/llama.cpp/build
 models/HY-MT1.5-1.8B-GGUF
 models/PaddleOCR-VL-1.5-GGUF
+models/HY-MT1.5-7B-GGUF
 .cache
 .deb-package
 .qoder

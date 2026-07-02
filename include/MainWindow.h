@@ -18,8 +18,10 @@ namespace DesktopTranslate {
 class SelectionOverlay;
 class TranslationResultWindow;
 class TestWindow;
+class DictionaryWindow;
 class Config;
 struct TranslationResult;
+struct DictionaryResult;
 
 /**
  * @brief 主窗口类 - 系统托盘应用
@@ -40,6 +42,9 @@ public slots:
     
     // 显示测试窗口
     void showTestWindow();
+
+    // 显示字典窗口
+    void showDictionaryWindow();
 
 private slots:
     void onSelectionComplete(const QRect& rect);
@@ -76,6 +81,7 @@ private:
     QAction* action_exit_{nullptr};
     QAction* action_test_window_{nullptr};
     QAction* action_hover_window_{nullptr};
+    QAction* action_dictionary_{nullptr};
     
     // 选区覆盖层
     std::unique_ptr<SelectionOverlay> selection_overlay_;
@@ -85,6 +91,9 @@ private:
     
     // 测试窗口
     std::unique_ptr<TestWindow> test_window_;
+
+    // 字典窗口
+    std::unique_ptr<DictionaryWindow> dictionary_window_;
     
     // 当前选区位置
     QPoint current_selection_pos_;

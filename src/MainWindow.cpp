@@ -7,6 +7,9 @@
 #include "TestWindow.h"
 #include "GlobalShortcut.h"
 #include "OCRService.h"
+#include "DictionaryWindow.h"
+#include "DictionaryService.h"
+#include "ModelServiceManager.h"
 #include <QApplication>
 #include <QClipboard>
 #include <QCursor>
@@ -29,6 +32,8 @@
 #include <QDateTime>
 #include <QLineEdit>
 #include <QPointer>
+#include <QCheckBox>
+#include <QLabel>
 
 #if defined(Q_OS_WIN)
 #include <windows.h>
@@ -78,6 +83,26 @@ QString hoverSourceDescription(QClipboard* clipboard, const QObject* context) {
     return context->tr("剪贴板文本");
 }
 
+// 检测文本是否像错误消息，避免悬浮翻译反馈循环
+bool looksLikeErrorMessage(const QString& text) {
+    static const QStringList errorMarkers = {
+        QStringLiteral("查询失败"),
+        QStringLiteral("翻译失败"),
+        QStringLiteral("CURL error"),
+        QStringLiteral("模型服务未运行"),
+        QStringLiteral("JSON parse error"),
+        QStringLiteral("Empty translation"),
+        QStringLiteral("HTTP error"),
+        QStringLiteral("Failed to initialize")
+    };
+    for (const auto& marker : errorMarkers) {
+        if (text.contains(marker, Qt::CaseInsensitive)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }
 
 MainWindow::MainWindow(QWidget* parent)
@@ -105,6 +130,11 @@ void MainWindow::setupUI() {
     // 初始化测试窗口 - 使用nullptr作为父窗口使其成为独立窗口
     test_window_ = std::make_unique<TestWindow>(nullptr);
     test_window_->setWindowIcon(QApplication::windowIcon());
+
+    // 初始化字典窗口 - 独立顶层窗口
+    dictionary_window_ = std::make_unique<DictionaryWindow>(nullptr);
+    dictionary_window_->setWindowIcon(QApplication::windowIcon());
+
     result_window_->hide();
 
     primary_selection_timer_ = new QTimer(this);
@@ -135,6 +165,8 @@ void MainWindow::setupSystemTray() {
     action_clipboard_translate_ = new QAction(tr("剪贴板翻译 (&C)"), this);
     action_clipboard_translate_->setShortcut(QKeySequence(QString::fromStdString(config.getShortcutClipboardTranslate())));
     action_test_window_ = new QAction(tr("显示测试窗口 (&T)"), this);
+    action_dictionary_ = new QAction(tr("字典查询 (&D)"), this);
+    action_dictionary_->setShortcut(QKeySequence(QString::fromStdString(config.getShortcutDictionary())));
     action_hover_window_ = new QAction(tr("悬浮气泡翻译 (&H)"), this);
     action_hover_window_->setShortcut(QKeySequence(QString::fromStdString(config.getShortcutHoverTranslationToggle())));
     action_hover_window_->setCheckable(true);
@@ -146,6 +178,7 @@ void MainWindow::setupSystemTray() {
     tray_menu_->addAction(action_select_translate_);
     tray_menu_->addAction(action_clipboard_translate_);
     tray_menu_->addAction(action_test_window_);
+    tray_menu_->addAction(action_dictionary_);
     tray_menu_->addAction(action_hover_window_);
     tray_menu_->addSeparator();
     tray_menu_->addAction(action_settings_);
@@ -183,6 +216,11 @@ void MainWindow::setupShortcuts() {
             QString::fromStdString(config.getShortcutHoverTranslationToggle()), "hover_translation_toggle")) {
         qWarning() << "Failed to register hover translation toggle shortcut";
     }
+
+    if (!globalShortcut.registerShortcut(
+            QString::fromStdString(config.getShortcutDictionary()), "dictionary_lookup")) {
+        qWarning() << "Failed to register dictionary shortcut";
+    }
     
     // 连接全局快捷键信号
     connect(&globalShortcut, &GlobalShortcut::shortcutActivated, 
@@ -194,6 +232,8 @@ void MainWindow::setupShortcuts() {
             translateFromClipboard();
         } else if (id == "hover_translation_toggle") {
             action_hover_window_->setChecked(!action_hover_window_->isChecked());
+        } else if (id == "dictionary_lookup") {
+            showDictionaryWindow();
         }
     });
     
@@ -205,6 +245,7 @@ void MainWindow::setupConnections() {
     connect(action_select_translate_, &QAction::triggered, this, &MainWindow::startSelectionTranslation);
     connect(action_clipboard_translate_, &QAction::triggered, this, &MainWindow::translateFromClipboard);
     connect(action_test_window_, &QAction::triggered, this, &MainWindow::showTestWindow);
+    connect(action_dictionary_, &QAction::triggered, this, &MainWindow::showDictionaryWindow);
     connect(action_hover_window_, &QAction::toggled, this, &MainWindow::toggleHoverTranslation);
     connect(action_settings_, &QAction::triggered, this, &MainWindow::onSettingsAction);
     connect(action_about_, &QAction::triggered, this, &MainWindow::onAboutAction);
@@ -225,6 +266,21 @@ void MainWindow::setupConnections() {
     
     // 测试窗口连接
     connect(test_window_.get(), &TestWindow::testApiRequested, this, &MainWindow::onTestApiConnection);
+
+    // 字典窗口连接
+    connect(dictionary_window_.get(), &DictionaryWindow::lookupRequested,
+            this, [this](const QString& word, const QString& language) {
+        dictionary_window_->setStatus(tr("查询中..."), "blue");
+        DictionaryService::instance().lookUpWithCallback(
+            word.toStdString(),
+            language.toStdString(),
+            [this](const DictionaryResult& result) {
+                QMetaObject::invokeMethod(this, [this, result]() {
+                    dictionary_window_->setResult(result);
+                }, Qt::QueuedConnection);
+            }
+        );
+    });
     connect(test_window_.get(), &TestWindow::translateTextRequested, this, [this](const QString& text) {
         current_selection_pos_ = QPoint(100, 100);  // 默认位置
         performTranslation(text);
@@ -472,6 +528,12 @@ void MainWindow::triggerPendingPrimaryTranslation() {
         return;
     }
 
+    // 跳过错误消息，避免反馈循环
+    if (looksLikeErrorMessage(text)) {
+        qDebug() << "Skipping error-like text in hover translation:" << text.left(50);
+        return;
+    }
+
     last_primary_text_ = text;
     current_selection_pos_ = QCursor::pos();
     test_window_->log(
@@ -602,6 +664,33 @@ void MainWindow::onSettingsAction() {
     
     layout->addWidget(transGroup);
     
+    // 高级翻译器设置
+    auto* advGroup = new QGroupBox(tr("高级翻译器"), &dialog);
+    auto* advLayout = new QHBoxLayout(advGroup);
+    advLayout->setSpacing(10);
+    
+    auto* advancedToggle = new QCheckBox(tr("开启高级翻译功能"), &dialog);
+    advancedToggle->setChecked(config.getUseAdvancedModel());
+    
+    auto* advHintLabel = new QLabel(tr("（使用该功能需要至少8GB显存）"), &dialog);
+    advHintLabel->setStyleSheet("color: #e67e22; font-size: 12px;");
+    
+    auto* keepSettingCheck = new QCheckBox(tr("是否保留此设置"), &dialog);
+    keepSettingCheck->setChecked(config.getKeepAdvancedSetting());
+    keepSettingCheck->setEnabled(advancedToggle->isChecked());
+    
+    // 当开关状态改变时，启用/禁用“保留”勾选框
+    connect(advancedToggle, &QCheckBox::toggled, keepSettingCheck, [keepSettingCheck](bool checked) {
+        keepSettingCheck->setEnabled(checked);
+    });
+    
+    advLayout->addWidget(advancedToggle);
+    advLayout->addWidget(advHintLabel);
+    advLayout->addStretch();
+    advLayout->addWidget(keepSettingCheck);
+    
+    layout->addWidget(advGroup);
+    
     // 快捷键设置
     auto* shortcutGroup = new QGroupBox(tr("快捷键设置"), &dialog);
     auto* shortcutLayout = new QFormLayout(shortcutGroup);
@@ -612,10 +701,13 @@ void MainWindow::onSettingsAction() {
     clipboardShortcutEdit->setPlaceholderText(tr("例如: Ctrl+F4"));
     auto* hoverShortcutEdit = new QLineEdit(QString::fromStdString(config.getShortcutHoverTranslationToggle()), &dialog);
     hoverShortcutEdit->setPlaceholderText(tr("例如: Ctrl+F8"));
+    auto* dictionaryShortcutEdit = new QLineEdit(QString::fromStdString(config.getShortcutDictionary()), &dialog);
+    dictionaryShortcutEdit->setPlaceholderText(tr("例如: Ctrl+F5"));
     
     shortcutLayout->addRow(tr("框选翻译:"), selectShortcutEdit);
     shortcutLayout->addRow(tr("剪贴板翻译:"), clipboardShortcutEdit);
     shortcutLayout->addRow(tr("悬浮气泡翻译开关:"), hoverShortcutEdit);
+    shortcutLayout->addRow(tr("字典查询:"), dictionaryShortcutEdit);
     
     layout->addWidget(shortcutGroup);
     
@@ -648,16 +740,54 @@ void MainWindow::onSettingsAction() {
         config.setShortcutSelectTranslate(selectShortcutEdit->text().toStdString());
         config.setShortcutClipboardTranslate(clipboardShortcutEdit->text().toStdString());
         config.setShortcutHoverTranslationToggle(hoverShortcutEdit->text().toStdString());
+        config.setShortcutDictionary(dictionaryShortcutEdit->text().toStdString());
         
-        config.save();
+        // 处理高级翻译器设置
+        bool originalUseAdvanced = config.getUseAdvancedModel();
+        bool newUseAdvanced = advancedToggle->isChecked();
+        bool keepSetting = keepSettingCheck->isChecked();
+        
+        if (newUseAdvanced != originalUseAdvanced) {
+            // 开关状态发生变化
+            config.setUseAdvancedModel(newUseAdvanced);
+            if (newUseAdvanced) {
+                config.setModel("HY-MT1.5-7B-Q8_0");
+            } else {
+                config.setModel("HY-MT1.5-1.8B-Q8_0");
+            }
+            config.setKeepAdvancedSetting(keepSetting);
+            
+            // 切换模型服务（停止当前，启动新的）
+            ModelServiceManager::instance().switchTranslationModel(newUseAdvanced);
+            
+            if (!keepSetting && newUseAdvanced) {
+                // 不保留设置：先保存（use_advanced_model=false），再恢复内存状态
+                config.setUseAdvancedModel(false);
+                config.save();
+                config.setUseAdvancedModel(true); // 仅内存中生效，不持久化
+            } else {
+                // 保留设置或取消高级：正常保存
+                config.save();
+            }
+        } else {
+            // 状态未变化，正常保存
+            config.save();
+        }
+        
+        // 更新翻译服务模型名
+        std::string currentModel = config.getModel();
         
         // 更新翻译服务配置
         TranslationService::instance().setEndpoint(endpointEdit->text().toStdString(), portSpin->value());
         TranslationService::instance().setApiKey(keyEdit->text().toStdString());
-        TranslationService::instance().setModel(modelEdit->text().toStdString());
+        TranslationService::instance().setModel(currentModel);
         TranslationService::instance().setTimeout(timeoutSpin->value());
         TranslationService::instance().setLanguages(sourceCombo->currentText().toStdString(), 
                                                      targetCombo->currentText().toStdString());
+        
+        // 更新字典服务配置
+        DictionaryService::instance().setModel(currentModel);
+        DictionaryService::instance().setEndpoint(endpointEdit->text().toStdString(), portSpin->value());
         
         // 更新 OCR 服务配置
         OCRService::instance().setEndpoint(ocrEndpointEdit->text().toStdString(), ocrPortSpin->value());
@@ -669,12 +799,15 @@ void MainWindow::onSettingsAction() {
         globalShortcut.unregisterShortcut("select_translate");
         globalShortcut.unregisterShortcut("clipboard_translate");
         globalShortcut.unregisterShortcut("hover_translation_toggle");
+        globalShortcut.unregisterShortcut("dictionary_lookup");
         globalShortcut.registerShortcut(selectShortcutEdit->text(), "select_translate");
         globalShortcut.registerShortcut(clipboardShortcutEdit->text(), "clipboard_translate");
         globalShortcut.registerShortcut(hoverShortcutEdit->text(), "hover_translation_toggle");
+        globalShortcut.registerShortcut(dictionaryShortcutEdit->text(), "dictionary_lookup");
         action_select_translate_->setShortcut(QKeySequence(selectShortcutEdit->text()));
         action_clipboard_translate_->setShortcut(QKeySequence(clipboardShortcutEdit->text()));
         action_hover_window_->setShortcut(QKeySequence(hoverShortcutEdit->text()));
+        action_dictionary_->setShortcut(QKeySequence(dictionaryShortcutEdit->text()));
         
         // 更新测试窗口配置显示
         updateConfigDisplay();
@@ -694,14 +827,30 @@ void MainWindow::onAboutAction() {
            "<p><b>快捷键:</b></p>"
            "<p>%1 - 框选翻译</p>"
            "<p>%2 - 剪贴板翻译</p>"
-           "<p>%3 - 悬浮气泡翻译开关</p>")
+           "<p>%3 - 悬浮气泡翻译开关</p>"
+           "<p>%4 - 字典查询</p>")
             .arg(QString::fromStdString(Config::instance().getShortcutSelectTranslate()))
             .arg(QString::fromStdString(Config::instance().getShortcutClipboardTranslate()))
-            .arg(QString::fromStdString(Config::instance().getShortcutHoverTranslationToggle())));
+            .arg(QString::fromStdString(Config::instance().getShortcutHoverTranslationToggle()))
+            .arg(QString::fromStdString(Config::instance().getShortcutDictionary())));
 }
 
 void MainWindow::onExitAction() {
     QApplication::quit();
+}
+
+void MainWindow::showDictionaryWindow() {
+    qDebug() << "showDictionaryWindow called";
+
+    if (dictionary_window_) {
+        dictionary_window_->show();
+        dictionary_window_->activateWindow();
+        dictionary_window_->raise();
+        dictionary_window_->setWindowState(Qt::WindowActive);
+        qDebug() << "Dictionary window shown";
+    } else {
+        qDebug() << "ERROR: dictionary_window_ is null!";
+    }
 }
 
 void MainWindow::showTestWindow() {
@@ -762,18 +911,22 @@ void MainWindow::updateConfigDisplay() {
         "源语言: %4\n"
         "目标语言: %5\n"
         "超时: %6秒\n"
-        "框选翻译快捷键: %7\n"
-        "剪贴板翻译快捷键: %8\n"
-        "悬浮气泡翻译开关快捷键: %9"
+        "高级翻译器: %7\n"
+        "框选翻译快捷键: %8\n"
+        "剪贴板翻译快捷键: %9\n"
+        "悬浮气泡翻译开关快捷键: %10\n"
+        "字典查询快捷键: %11"
     ).arg(QString::fromStdString(config.getApiEndpoint()))
      .arg(config.getApiPort())
      .arg(QString::fromStdString(config.getModel()))
      .arg(QString::fromStdString(config.getSourceLanguage()))
      .arg(QString::fromStdString(config.getTargetLanguage()))
      .arg(config.getApiTimeout())
+     .arg(config.getUseAdvancedModel() ? tr("已开启") : tr("未开启"))
      .arg(QString::fromStdString(config.getShortcutSelectTranslate()))
      .arg(QString::fromStdString(config.getShortcutClipboardTranslate()))
-     .arg(QString::fromStdString(config.getShortcutHoverTranslationToggle()));
+     .arg(QString::fromStdString(config.getShortcutHoverTranslationToggle()))
+     .arg(QString::fromStdString(config.getShortcutDictionary()));
     
     test_window_->showConfig(configInfo);
 }

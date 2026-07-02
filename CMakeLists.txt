@@ -91,6 +91,8 @@ set(SOURCES
     src/TestWindow.cpp
     src/GlobalShortcut.cpp
     src/OCRService.cpp
+    src/DictionaryService.cpp
+    src/DictionaryWindow.cpp
 )
 
 set(HEADERS
@@ -105,6 +107,8 @@ set(HEADERS
     include/TestWindow.h
     include/GlobalShortcut.h
     include/OCRService.h
+    include/DictionaryService.h
+    include/DictionaryWindow.h
 )
 
 # 可执行文件

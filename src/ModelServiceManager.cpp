@@ -6,6 +6,7 @@
 #include <QProcess>
 #include <QTimer>
 #include <QDebug>
+#include <QThread>
 
 #if defined(Q_OS_WIN)
 #include <windows.h>
@@ -103,6 +104,11 @@ bool llamaServerHasOffloadDevice(const QString& executablePath) {
 
 }
 
+ModelServiceManager& ModelServiceManager::instance() {
+    static ModelServiceManager service(nullptr);
+    return service;
+}
+
 ModelServiceManager::ModelServiceManager(QObject* parent)
     : QObject(parent)
 {
@@ -122,16 +128,30 @@ void ModelServiceManager::startAsync() {
 }
 
 void ModelServiceManager::stopAll() {
+    // 停止重启定时器
+    for (auto* timer : restart_timers_) {
+        if (timer) {
+            timer->stop();
+        }
+    }
     stopProcess(translation_process_);
     stopProcess(ocr_process_);
 }
 
 void ModelServiceManager::startAll() {
-    startService(translationServiceSpec());
-    startService(ocrServiceSpec());
+    auto transSpec = translationServiceSpec();
+    restart_counts_[transSpec.kind] = 0;
+    startService(transSpec);
+
+    auto ocrSpec = ocrServiceSpec();
+    restart_counts_[ocrSpec.kind] = 0;
+    startService(ocrSpec);
 }
 
 void ModelServiceManager::startService(const ServiceSpec& spec) {
+    // 存储spec以便崩溃后重启
+    stored_specs_[spec.kind] = spec;
+
     const QString executablePath = llamaServerPath();
     if (executablePath.isEmpty()) {
         qWarning() << "llama-server executable not found under third_party/llama.cpp/build";
@@ -227,14 +247,51 @@ QProcess* ModelServiceManager::ensureProcess(ServiceKind kind, const QString& na
     connect(process,
             qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
             this,
-            [name](int exitCode, QProcess::ExitStatus exitStatus) {
+            [this, kind, name](int exitCode, QProcess::ExitStatus exitStatus) {
                 qWarning().noquote() << QStringLiteral("%1 model service exited with code %2 status %3")
                                             .arg(name)
                                             .arg(exitCode)
                                             .arg(exitStatus == QProcess::NormalExit ? "normal" : "crash");
+
+                // 崩溃后自动重启
+                if (exitStatus == QProcess::CrashExit) {
+                    int& count = restart_counts_[kind];
+                    ++count;
+                    if (count > kMaxRestartAttempts) {
+                        qWarning().noquote() << QStringLiteral("%1 model service exceeded max restart attempts (%2), giving up")
+                                                    .arg(name)
+                                                    .arg(kMaxRestartAttempts);
+                        return;
+                    }
+
+                    // 延时重启，避免崩溃循环
+                    QTimer*& timer = restart_timers_[kind];
+                    if (!timer) {
+                        timer = new QTimer(this);
+                        timer->setSingleShot(true);
+                        connect(timer, &QTimer::timeout, this, [this, kind]() {
+                            auto it = stored_specs_.find(kind);
+                            if (it != stored_specs_.end()) {
+                                restartService(it.value());
+                            }
+                        });
+                    }
+                    timer->start(kRestartDelayMs);
+                    qWarning().noquote() << QStringLiteral("%1 model service will restart in %2ms")
+                                                .arg(name)
+                                                .arg(kRestartDelayMs);
+                }
             });
 
     return process;
+}
+
+void ModelServiceManager::restartService(const ServiceSpec& spec) {
+    qInfo().noquote() << QStringLiteral("Restarting %1 model service (attempt %2/%3)")
+                             .arg(spec.name)
+                             .arg(restart_counts_.value(spec.kind, 0))
+                             .arg(kMaxRestartAttempts);
+    startService(spec);
 }
 
 void ModelServiceManager::stopProcess(QProcess* process) {
@@ -283,7 +340,39 @@ QString ModelServiceManager::llamaServerPath() const {
 }
 
 QString ModelServiceManager::translationModelPath() const {
+    const auto& config = Config::instance();
+    if (config.getUseAdvancedModel()) {
+        return advancedTranslationModelPath();
+    }
     return firstModelFile(QDir(projectRootPath()).filePath("models/HY-MT1.5-1.8B-GGUF"), {"*.gguf"});
+}
+
+QString ModelServiceManager::advancedTranslationModelPath() const {
+    return firstModelFile(QDir(projectRootPath()).filePath("models/HY-MT1.5-7B-GGUF"), {"*.gguf"});
+}
+
+void ModelServiceManager::switchTranslationModel(bool advanced) {
+    // 配置应由调用方更新，此处仅负责进程管理
+    qInfo().noquote() << QStringLiteral("Switching translation model to %1")
+                             .arg(advanced ? QStringLiteral("HY-MT1.5-7B (advanced)") : QStringLiteral("HY-MT1.5-1.8B (standard)"));
+    
+    // 停止翻译服务的重启定时器
+    auto* timer = restart_timers_.value(ServiceKind::Translation);
+    if (timer) {
+        timer->stop();
+    }
+    
+    // 重置重启计数
+    restart_counts_[ServiceKind::Translation] = 0;
+    
+    // 停止当前翻译进程
+    stopProcess(translation_process_);
+    
+    // 延迟启动新服务，确保旧进程完全退出
+    auto spec = translationServiceSpec();
+    QTimer::singleShot(1000, this, [this, spec]() {
+        startService(spec);
+    });
 }
 
 QString ModelServiceManager::ocrModelPath() const {

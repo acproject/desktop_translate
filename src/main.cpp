@@ -59,8 +59,7 @@ int main(int argc, char* argv[]) {
         std::cout << "Loading config..." << std::endl;
         DesktopTranslate::Config::instance().load();
 
-        DesktopTranslate::ModelServiceManager modelServiceManager(&app);
-        modelServiceManager.startAsync();
+        DesktopTranslate::ModelServiceManager::instance().startAsync();
         
         std::cout << "Creating main window..." << std::endl;
         DesktopTranslate::MainWindow mainWindow;

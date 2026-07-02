@@ -3,6 +3,8 @@
 
 #include <QObject>
 #include <QString>
+#include <QHash>
+#include <QTimer>
 
 class QProcess;
 
@@ -12,13 +14,19 @@ class ModelServiceManager : public QObject {
     Q_OBJECT
 
 public:
-    explicit ModelServiceManager(QObject* parent = nullptr);
+    static ModelServiceManager& instance();
     ~ModelServiceManager() override;
 
     void startAsync();
     void stopAll();
 
+    // 切换翻译模型（高级/标准）
+    void switchTranslationModel(bool advanced);
+
 private:
+    ModelServiceManager(QObject* parent = nullptr);
+    ModelServiceManager(const ModelServiceManager&) = delete;
+    ModelServiceManager& operator=(const ModelServiceManager&) = delete;
     enum class ServiceKind {
         Translation,
         OCR,
@@ -37,11 +45,13 @@ private:
 
     void startAll();
     void startService(const ServiceSpec& spec);
+    void restartService(const ServiceSpec& spec);
     QProcess* ensureProcess(ServiceKind kind, const QString& name);
     void stopProcess(QProcess* process);
     QString projectRootPath() const;
     QString llamaServerPath() const;
     QString translationModelPath() const;
+    QString advancedTranslationModelPath() const;
     QString ocrModelPath() const;
     QString ocrProjectorPath() const;
     QString ocrChatTemplatePath() const;
@@ -51,6 +61,13 @@ private:
     QProcess* translation_process_{nullptr};
     QProcess* ocr_process_{nullptr};
     bool started_{false};
+
+    // 崩溃自动重启
+    QHash<ServiceKind, ServiceSpec> stored_specs_;
+    QHash<ServiceKind, int> restart_counts_;
+    QHash<ServiceKind, QTimer*> restart_timers_;
+    static constexpr int kMaxRestartAttempts = 5;
+    static constexpr int kRestartDelayMs = 3000;
 };
 
 } // namespace DesktopTranslate
