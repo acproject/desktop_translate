@@ -81,7 +81,7 @@ cmake --build . --config Release
 ```bash
 ./build_deb.sh
 # or specify version
-./build_deb.sh 1.0.7
+./build_deb.sh 1.5.0
 ```
 
 Generated deb package is located in the `dist/` directory.
