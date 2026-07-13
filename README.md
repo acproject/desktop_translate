@@ -12,6 +12,7 @@ A simple desktop translation tool that supports region selection translation, cl
 - **Local Models**: Based on llama.cpp, supports OpenAI compatible API, data stays local
 - **Global Shortcuts**: Trigger translation with global shortcuts, no need to switch windows
 - **Translation Result Bubble**: Elegant floating bubble to display translation results, supports pinning and copying
+- **Dictionary Lookup** (cross-platform): Reuses the local LLM as a multilingual dictionary, providing translation, phonetic, part of speech, bilingual definitions, examples and notes
 
 ## Screenshots
 
@@ -102,6 +103,7 @@ After launch, the program runs in the system tray.
 |----------|--------|
 | `F7` | Region selection translation |
 | `F9` | Clipboard translation |
+| `Ctrl+F5` | Dictionary lookup (default, configurable) |
 | `Ctrl+F8` | Toggle floating bubble translation |
 
 Shortcuts can be customized in the settings panel.
@@ -112,6 +114,7 @@ Shortcuts can be customized in the settings panel.
 - **Clipboard Translation (C)**: Translate text currently in the clipboard
 - **Show Test Window (T)**: Open debug test window
 - **Floating Bubble Translation (H)**: Toggle floating translation bubble
+- **Dictionary Lookup (D)**: Open the standalone dictionary window (multilingual)
 - **Settings (O)**: Open settings panel
 - **About (A)**: Show version information
 - **Exit (X)**: Exit the program
@@ -123,6 +126,21 @@ After translation completes, results are displayed as a bubble near the selectio
 - **Copy**: Copy the translation to clipboard
 - **Drag**: Drag the bubble to any position
 - Unpinned bubbles auto-close after 12 seconds
+
+### Dictionary Lookup
+
+Open the standalone window from the tray menu **Dictionary Lookup (D)** or via the shortcut `Ctrl+F5`. The dictionary runs entirely locally (it reuses the same LLM endpoint as the translation service), so no data leaves the machine.
+
+- Type a word or phrase, pick a language (or use "Auto")
+- Press Enter or click **Lookup**
+- The window renders a structured entry:
+  - **Translation**: the most common counterpart in the target language
+  - **Phonetic**: pinyin with tone marks for the Chinese counterpart, IPA when the queried word is itself Chinese
+  - **Part of speech**: noun / verb / adjective / etc.
+  - **Definitions / Examples / Notes**: bilingual, one item per line
+- The raw LLM response is also kept at the bottom as a fallback
+
+> Fully supported on Windows / macOS as well — the implementation only depends on Qt + libcurl and has no platform-specific code.
 
 ## Configuration
 
@@ -193,6 +211,8 @@ desktop_translate/
 │   ├── SelectionOverlay.cpp      # Region selection overlay
 │   ├── TranslationService.cpp    # Translation service
 │   ├── TranslationResultWindow.cpp # Translation result bubble
+│   ├── DictionaryService.cpp     # Dictionary lookup service
+│   ├── DictionaryWindow.cpp      # Dictionary lookup window
 │   ├── OCRService.cpp      # OCR service
 │   ├── Config.cpp          # Configuration management
 │   ├── ClipboardManager.cpp # Clipboard management
