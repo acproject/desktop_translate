@@ -108,13 +108,12 @@ bool looksLikeErrorMessage(const QString& text) {
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
+    setWindowFlags(Qt::Window | Qt::WindowStaysOnTopHint);
+
     setupUI();
     setupSystemTray();
     setupShortcuts();
     setupConnections();
-    
-    // 隐藏主窗口（托盘应用）
-    setWindowFlags(Qt::Window | Qt::WindowStaysOnTopHint);
 }
 
 MainWindow::~MainWindow() = default;
@@ -146,10 +145,8 @@ void MainWindow::setupUI() {
 void MainWindow::setupSystemTray() {
     auto& config = Config::instance();
     
-    // 创建系统托盘图标
     tray_icon_ = std::make_unique<QSystemTrayIcon>(this);
     
-    // 设置图标（使用系统默认图标或自定义图标）
     QIcon icon = loadTrayIcon();
     if (icon.isNull()) {
         icon = QIcon::fromTheme("edit-copy", QApplication::style()->standardIcon(QStyle::SP_FileDialogContentsView));
@@ -157,23 +154,45 @@ void MainWindow::setupSystemTray() {
     tray_icon_->setIcon(icon);
     tray_icon_->setToolTip(tr("桌面翻译"));
     
-    // 创建托盘菜单
-    tray_menu_ = std::make_unique<QMenu>(this);
+    tray_menu_ = std::make_unique<QMenu>();
     
     action_select_translate_ = new QAction(tr("框选翻译 (&S)"), this);
     action_select_translate_->setShortcut(QKeySequence(QString::fromStdString(config.getShortcutSelectTranslate())));
+    action_select_translate_->setVisible(true);
+    action_select_translate_->setEnabled(true);
+    
     action_clipboard_translate_ = new QAction(tr("剪贴板翻译 (&C)"), this);
     action_clipboard_translate_->setShortcut(QKeySequence(QString::fromStdString(config.getShortcutClipboardTranslate())));
+    action_clipboard_translate_->setVisible(true);
+    action_clipboard_translate_->setEnabled(true);
+    
     action_test_window_ = new QAction(tr("显示测试窗口 (&T)"), this);
+    action_test_window_->setVisible(true);
+    action_test_window_->setEnabled(true);
+    
     action_dictionary_ = new QAction(tr("字典查询 (&D)"), this);
     action_dictionary_->setShortcut(QKeySequence(QString::fromStdString(config.getShortcutDictionary())));
+    action_dictionary_->setVisible(true);
+    action_dictionary_->setEnabled(true);
+    
     action_hover_window_ = new QAction(tr("悬浮气泡翻译 (&H)"), this);
     action_hover_window_->setShortcut(QKeySequence(QString::fromStdString(config.getShortcutHoverTranslationToggle())));
     action_hover_window_->setCheckable(true);
     action_hover_window_->setChecked(hover_translation_enabled_);
+    action_hover_window_->setVisible(true);
+    action_hover_window_->setEnabled(true);
+    
     action_settings_ = new QAction(tr("设置 (&O)"), this);
+    action_settings_->setVisible(true);
+    action_settings_->setEnabled(true);
+    
     action_about_ = new QAction(tr("关于 (&A)"), this);
+    action_about_->setVisible(true);
+    action_about_->setEnabled(true);
+    
     action_exit_ = new QAction(tr("退出 (&X)"), this);
+    action_exit_->setVisible(true);
+    action_exit_->setEnabled(true);
     
     tray_menu_->addAction(action_select_translate_);
     tray_menu_->addAction(action_clipboard_translate_);
@@ -188,6 +207,20 @@ void MainWindow::setupSystemTray() {
     
     tray_icon_->setContextMenu(tray_menu_.get());
     tray_icon_->show();
+
+#if defined(Q_OS_WIN)
+    QTimer::singleShot(100, this, [this]() {
+        if (tray_icon_) {
+            tray_icon_->setContextMenu(nullptr);
+            tray_icon_->setContextMenu(tray_menu_.get());
+        }
+    });
+#endif
+    
+    qDebug() << "Tray menu actions count:" << tray_menu_->actions().size();
+    for (QAction* act : tray_menu_->actions()) {
+        qDebug() << "  -" << act->text() << "visible:" << act->isVisible() << "enabled:" << act->isEnabled();
+    }
 }
 
 void MainWindow::setupShortcuts() {
@@ -842,15 +875,17 @@ void MainWindow::onExitAction() {
 void MainWindow::showDictionaryWindow() {
     qDebug() << "showDictionaryWindow called";
 
-    if (dictionary_window_) {
-        dictionary_window_->show();
-        dictionary_window_->activateWindow();
-        dictionary_window_->raise();
-        dictionary_window_->setWindowState(Qt::WindowActive);
-        qDebug() << "Dictionary window shown";
-    } else {
+    if (!dictionary_window_) {
         qDebug() << "ERROR: dictionary_window_ is null!";
+        return;
     }
+
+    dictionary_window_->show();
+    dictionary_window_->showNormal();
+    dictionary_window_->activateWindow();
+    dictionary_window_->raise();
+    dictionary_window_->setWindowState(Qt::WindowActive);
+    qDebug() << "Dictionary window shown, isVisible:" << dictionary_window_->isVisible();
 }
 
 void MainWindow::showTestWindow() {
